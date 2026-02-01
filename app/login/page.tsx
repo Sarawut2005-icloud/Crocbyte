@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react"; // ✅ เพิ่ม Suspense
 import { 
   signInWithPopup, 
   GoogleAuthProvider, 
@@ -12,7 +12,6 @@ import { auth, db } from "../../lib/firebase";
 import { useRouter, useSearchParams } from "next/navigation";
 import { doc, getDoc, setDoc, serverTimestamp, collection, query, where, getDocs } from "firebase/firestore";
 import { motion, AnimatePresence } from "framer-motion";
-
 // --- IMPORTS FROM LANDING PAGE ---
 import { SnowBackground } from "@/components/SnowBackground";
 import { UnderwaterBackground } from "@/components/UnderwaterBackground";
@@ -29,7 +28,6 @@ const TopRightControls = ({
   goHome 
 }: any) => {
   const isDark = theme === "dark";
-
   // Base styling for mini buttons
   const btnBase = "relative flex items-center justify-center w-9 h-9 rounded-full transition-all duration-300 backdrop-blur-sm border";
   
@@ -62,7 +60,7 @@ const TopRightControls = ({
           title="Back to Home"
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
           </svg>
         </button>
 
@@ -70,7 +68,7 @@ const TopRightControls = ({
 
         {/* 2. SCENE TOGGLES */}
         <div className="flex gap-1">
-          <button 
+           <button 
             onClick={() => setScene('underwater')}
             className={getBtnStyle(scene === 'underwater', "bg-cyan-500 shadow-cyan-500/50")}
             title="Underwater"
@@ -78,7 +76,7 @@ const TopRightControls = ({
             🌊
           </button>
           <button 
-            onClick={() => setScene('snow')}
+           onClick={() => setScene('snow')}
             className={getBtnStyle(scene === 'snow', "bg-blue-600 shadow-blue-600/50")}
             title="Snow"
           >
@@ -118,7 +116,7 @@ const TopRightControls = ({
   );
 };
 
-// ... [MotionToast Component remains same] ...
+// ... [MotionToast Component] ...
 const MotionToast = ({ message, type, isVisible, onClose }: any) => {
     const isSuccess = type === 'success';
     return (
@@ -141,7 +139,7 @@ const MotionToast = ({ message, type, isVisible, onClose }: any) => {
               {isSuccess ? "🦈" : "🐙"}
             </div>
             <div className="flex-1">
-              <h4 className={cn("text-xs font-black uppercase tracking-widest", isSuccess ? "text-emerald-400" : "text-red-400")}>
+               <h4 className={cn("text-xs font-black uppercase tracking-widest", isSuccess ? "text-emerald-400" : "text-red-400")}>
                 {isSuccess ? "SYSTEM READY" : "ACCESS DENIED"}
               </h4>
               <p className="text-xs font-medium opacity-80">{message}</p>
@@ -159,7 +157,7 @@ const MotionToast = ({ message, type, isVisible, onClose }: any) => {
     );
 };
 
-// ... [CrocInput & CrocButton Components remain same] ...
+// ... [CrocInput & CrocButton Components] ...
 const CrocInput = ({ label, type, value, onChange, placeholder, required, maxLength, error, readOnly }: any) => (
     <div className="space-y-1 group">
       <label className={cn(
@@ -169,7 +167,7 @@ const CrocInput = ({ label, type, value, onChange, placeholder, required, maxLen
         {label} {required && <span className="text-red-400">*</span>}
       </label>
       <div className="relative">
-        <input 
+         <input 
           type={type} 
           value={value} 
           onChange={onChange}
@@ -232,18 +230,17 @@ const CrocButton = ({ children, onClick, loading, error, type = "button", varian
     );
 };
 
-// --- MAIN PAGE ---
-
-export default function LoginPage() {
+// ✅ แยก Component หลักออกมา (เพื่อห่อ Suspense)
+const LoginContent = () => {
   const router = useRouter();
   const searchParams = useSearchParams();
-
+  
   // -- STATE: System --
   const [scene, setScene] = useState<"underwater" | "snow">("underwater");
   const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [isLiteMode, setIsLiteMode] = useState(false);
   const [mounted, setMounted] = useState(false);
-
+  
   // -- STATE: Auth --
   const [loading, setLoading] = useState(false);
   const [errorState, setErrorState] = useState(false);
@@ -266,7 +263,7 @@ export default function LoginPage() {
 
     const savedScene = localStorage.getItem("croc_scene");
     const savedTheme = localStorage.getItem("croc_theme");
-    const savedLite = localStorage.getItem("croc_lite_mode"); // ใช้ key ให้ตรงกันกับหน้าแรก
+    const savedLite = localStorage.getItem("croc_lite_mode");
 
     if (paramScene) setScene(paramScene as any);
     else if (savedScene) setScene(savedScene as any);
@@ -303,7 +300,7 @@ export default function LoginPage() {
     router.push("/"); 
   };
 
-  // --- HANDLERS: AUTH (Same as before) ---
+  // --- HANDLERS: AUTH ---
   const showNotification = (msg: string, type: 'success' | 'error') => {
     setToast({ show: true, message: msg, type });
     if (type === 'error') {
@@ -334,7 +331,6 @@ export default function LoginPage() {
     return true;
   };
 
-  // ... (Auth Functions: handleGoogleLogin, handleEmailLogin, etc.)
   const handleGoogleLogin = async () => {
     setLoading(true);
     try {
@@ -343,7 +339,6 @@ export default function LoginPage() {
       const user = result.user;
       const docRef = doc(db, "users", user.uid);
       const docSnap = await getDoc(docRef);
-
       if (docSnap.exists() && docSnap.data().realName) {
         showNotification("ยินดีต้อนรับกลับมาครับ! 🦈", "success");
         setTimeout(() => router.push("/services"), 1500);
@@ -377,7 +372,6 @@ export default function LoginPage() {
     e.preventDefault();
     if (!validateForm()) return;
     setLoading(true);
-
     const q = query(collection(db, "users"), where("email", "==", formData.email));
     const querySnapshot = await getDocs(q);
     if (!querySnapshot.empty) {
@@ -439,7 +433,7 @@ export default function LoginPage() {
       isDark ? "bg-[#020617] text-white" : "bg-slate-50 text-slate-900"
     )}>
       
-      {/* 🎮 TOP RIGHT CONTROL BAR (The main request) */}
+      {/* 🎮 TOP RIGHT CONTROL BAR */}
       <TopRightControls 
         scene={scene} 
         setScene={handleSceneChange}
@@ -532,12 +526,12 @@ export default function LoginPage() {
                   <div className="relative flex justify-center text-xs uppercase"><span className={cn("px-2 opacity-50", isDark ? "bg-[#001a2c] text-white" : "bg-white text-black")}>Or continue with</span></div>
                 </div>
 
-                <CrocButton onClick={() => setMode("email_login")} variant="primary">
+                 <CrocButton onClick={() => setMode("email_login")} variant="primary">
                   Email Login
                 </CrocButton>
                 
                 <div className="text-center pt-2">
-                  <button onClick={() => setMode("email_register")} className="text-xs text-cyan-400 hover:underline opacity-80">
+                 <button onClick={() => setMode("email_register")} className="text-xs text-cyan-400 hover:underline opacity-80">
                     Register New Account
                   </button>
                 </div>
@@ -590,7 +584,7 @@ export default function LoginPage() {
                  </div>
                  <div className="pt-2 flex gap-3">
                     <div className="w-1/3">
-                      <CrocButton type="button" onClick={() => setMode("initial")} variant="danger">Back</CrocButton>
+                       <CrocButton type="button" onClick={() => setMode("initial")} variant="danger">Back</CrocButton>
                     </div>
                     <div className="w-2/3">
                       <CrocButton type="submit" loading={loading} error={errorState}>Join</CrocButton>
@@ -616,8 +610,8 @@ export default function LoginPage() {
                    <CrocInput label="ชื่อเล่น" type="text" value={formData.nickname} onChange={(e:any) => handleChange('nickname', e.target.value)} required error={errorState} />
                  </div>
                  <div className="grid grid-cols-2 gap-3">
-                    <CrocInput label="เบอร์โทร" type="tel" value={formData.phone} onChange={(e:any) => handleChange('phone', e.target.value)} maxLength={10} required error={errorState} />
-                    <CrocInput label="วันเกิด" type="date" value={formData.birthDate} onChange={(e:any) => handleChange('birthDate', e.target.value)} required error={errorState} />
+                   <CrocInput label="เบอร์โทร" type="tel" value={formData.phone} onChange={(e:any) => handleChange('phone', e.target.value)} maxLength={10} required error={errorState} />
+                   <CrocInput label="วันเกิด" type="date" value={formData.birthDate} onChange={(e:any) => handleChange('birthDate', e.target.value)} required error={errorState} />
                  </div>
                  <CrocInput label="LINE ID" type="text" value={formData.lineId} onChange={(e:any) => handleChange('lineId', e.target.value)} />
                  <div className="pt-2 flex gap-3">
@@ -631,22 +625,32 @@ export default function LoginPage() {
                     <div className="w-2/3">
                       <CrocButton type="submit" loading={loading} error={errorState}>Confirm</CrocButton>
                     </div>
-                 </div>
+                  </div>
                </motion.form>
             )}
           </AnimatePresence>
         </div>
       </motion.div>
 
+      {/* ✅ UPDATED TEXT */}
       <motion.div 
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: 0.5 }}
         className="absolute bottom-4 text-[9px] font-mono opacity-30 tracking-[0.2em]"
       >
-        UPLINK SECURED
+        SYSTEM ONLINE :: WELCOME BACK, SIR
       </motion.div>
 
     </div>
+  );
+};
+
+// ✅ WRAPPER COMPONENT: ต้องมี Suspense ครอบ LoginContent เสมอ!
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="h-screen w-screen bg-[#020617] flex items-center justify-center text-cyan-500 font-mono animate-pulse">LOADING SYSTEM...</div>}>
+      <LoginContent />
+    </Suspense>
   );
 }
