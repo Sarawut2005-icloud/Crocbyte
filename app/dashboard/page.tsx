@@ -1,471 +1,477 @@
 "use client";
-import { useState, useEffect, useRef } from "react";
-import { auth, db } from "../../lib/firebase";
-import { useRouter } from "next/navigation";
-import { onAuthStateChanged, signOut } from "firebase/auth";
-import { doc, getDoc, collection, query, where, orderBy, getDocs, updateDoc, serverTimestamp } from "firebase/firestore";
-import MagicBackground from "../../components/MagicBackground";
 
-// --- 💎 VIP CONFIG (สูตรใหม่ตามที่ขอ) ---
+import { useState, useEffect, useMemo, useRef } from "react";
+import { auth, db } from "../../lib/firebase"; 
+import { useRouter } from "next/navigation";
+import { doc, getDoc, updateDoc, collection, query, where, orderBy, getDocs } from "firebase/firestore";
+import { onAuthStateChanged, signOut } from "firebase/auth";
+// เพิ่ม import สำหรับ Storage (อัปโหลดรูป)
+import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage"; 
+import { motion, AnimatePresence } from "framer-motion";
+
+// --- IMPORTS FROM LANDING PAGE ---
+import { SnowBackground } from "@/components/SnowBackground";
+import { UnderwaterBackground } from "@/components/UnderwaterBackground";
+
+// --- CONSTANTS (VIP TIERS) ---
+// ตารางส่วนลดตามยอดสะสม (ยอดเต็มที่แอดมินกรอก)
 const VIP_TIERS = [
   { level: 0, minSpend: 0, discount: 0 },
-  { level: 1, minSpend: 1000, discount: 0.04 },  // 4%
-  { level: 2, minSpend: 4000, discount: 0.10 },  // 10%
-  { level: 3, minSpend: 10000, discount: 0.14 }, // 14%
-  { level: 4, minSpend: 30000, discount: 0.18 }, // 18%
-  { level: 5, minSpend: 50000, discount: 0.24 }, // 24%
-  { level: 6, minSpend: 80000, discount: 0.28 }, // 28%
-  { level: 7, minSpend: 100000, discount: 0.36 },// 36%
-  { level: 8, minSpend: 125000, discount: 0.42 },// 42%
-  { level: 9, minSpend: 150000, discount: 0.48 },// 48%
-  { level: 10, minSpend: 200000, discount: 0.60 }// 60%
+  { level: 1, minSpend: 1000, discount: 0.04 },  
+  { level: 2, minSpend: 4000, discount: 0.10 }, 
+  { level: 3, minSpend: 10000, discount: 0.14 }, 
+  { level: 4, minSpend: 30000, discount: 0.18 }, 
+  { level: 5, minSpend: 50000, discount: 0.24 }, 
+  { level: 6, minSpend: 80000, discount: 0.28 }, 
+  { level: 7, minSpend: 100000, discount: 0.36 },
+  { level: 8, minSpend: 125000, discount: 0.42 },
+  { level: 9, minSpend: 150000, discount: 0.48 },
+  { level: 10, minSpend: 200000, discount: 0.60 }
 ];
 
-export default function Dashboard() {
+// --- UTILITIES ---
+const cn = (...classes: (string | undefined | null | boolean)[]) => 
+  classes.filter(Boolean).join(" ");
+
+// --- COMPONENTS ---
+
+// 1. Top Right Controls
+const TopRightControls = ({ scene, setScene, theme, setTheme, isLite, toggleLite, goHome }: any) => {
+  const isDark = theme === "dark";
+  const btnBase = "relative flex items-center justify-center w-9 h-9 rounded-full transition-all duration-300 backdrop-blur-sm border";
+  
+  const getBtnStyle = (isActive: boolean, activeColor: string) => cn(
+    btnBase,
+    isActive 
+      ? `${activeColor} text-white border-transparent shadow-lg scale-105` 
+      : isDark 
+        ? "bg-white/5 border-white/10 text-white/50 hover:bg-white/10 hover:text-white" 
+        : "bg-black/5 border-black/10 text-black/50 hover:bg-black/10 hover:text-black"
+  );
+
+  return (
+    <motion.div 
+      initial={{ y: -50, opacity: 0 }}
+      animate={{ y: 0, opacity: 1 }}
+      transition={{ delay: 0.2, type: "spring" }}
+      className="fixed top-6 right-6 z-[50] flex items-center gap-3"
+    >
+      <div className={cn(
+        "flex items-center gap-2 p-2 rounded-full border shadow-2xl backdrop-blur-xl",
+        isDark ? "bg-[#0f172a]/60 border-white/10" : "bg-white/60 border-slate-200"
+      )}>
+        <button onClick={goHome} className={getBtnStyle(false, "")} title="services">🏠</button>
+        <div className="w-[1px] h-5 bg-current opacity-10 mx-1" />
+        <div className="flex gap-1">
+          <button onClick={() => setScene('underwater')} className={getBtnStyle(scene === 'underwater', "bg-cyan-500 shadow-cyan-500/50")}>🌊</button>
+          <button onClick={() => setScene('snow')} className={getBtnStyle(scene === 'snow', "bg-blue-600 shadow-blue-600/50")}>❄️</button>
+        </div>
+        <div className="w-[1px] h-5 bg-current opacity-10 mx-1" />
+        <button onClick={() => setTheme(isDark ? 'light' : 'dark')} className={getBtnStyle(false, "")}>{isDark ? "☀️" : "🌙"}</button>
+        <button onClick={toggleLite} className={cn("px-3 h-9 rounded-full flex items-center gap-2 transition-all duration-300 font-bold text-[10px] tracking-widest uppercase border", isLite ? "bg-yellow-400 border-yellow-400 text-black shadow-[0_0_15px_rgba(250,204,21,0.4)]" : isDark ? "bg-white/5 border-white/10 text-white/40 hover:text-white" : "bg-black/5 border-black/10 text-black/40 hover:text-black")}>
+          <span>LITE</span>
+          <div className={cn("w-1.5 h-1.5 rounded-full", isLite ? "bg-black animate-pulse" : "bg-current opacity-30")} />
+        </button>
+      </div>
+    </motion.div>
+  );
+};
+
+// 2. Generic Modal
+const Modal = ({ isOpen, onClose, title, children, isDark }: any) => {
+  if (!isOpen) return null;
+  return (
+    <AnimatePresence>
+      <motion.div 
+        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+        onClick={onClose}
+      >
+        <motion.div 
+          initial={{ scale: 0.95, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.95, opacity: 0, y: 20 }}
+          className={cn(
+            "relative w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden max-h-[85vh] flex flex-col",
+            isDark ? "bg-[#0f172a] border border-cyan-500/30 text-white" : "bg-white border-white text-slate-900"
+          )}
+          onClick={e => e.stopPropagation()}
+        >
+          <div className="p-6 border-b border-white/10 flex justify-between items-center bg-gradient-to-r from-transparent via-white/5 to-transparent">
+            <h3 className="font-serif text-2xl font-bold">{title}</h3>
+            <button onClick={onClose} className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-red-500/20 hover:text-red-500 transition-colors">✕</button>
+          </div>
+          <div className="p-6 overflow-y-auto custom-scrollbar flex-1">
+            {children}
+          </div>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
+  );
+};
+
+// 3. Stat Card
+const StatCard = ({ icon, label, value, subValue, delay, isDark }: any) => (
+  <motion.div
+    initial={{ opacity: 0, y: 20 }}
+    animate={{ opacity: 1, y: 0 }}
+    transition={{ delay: delay, type: "spring" }}
+    className={cn(
+      "relative overflow-hidden rounded-2xl p-5 border group hover:scale-[1.02] transition-transform duration-300",
+      isDark ? "bg-white/5 border-white/10 hover:bg-white/10" : "bg-white/60 border-black/5 hover:bg-white/80"
+    )}
+  >
+    <div className="flex justify-between items-start mb-4">
+      <div className={cn("p-2 rounded-lg text-xl", isDark ? "bg-cyan-500/20 text-cyan-300" : "bg-cyan-100 text-cyan-700")}>{icon}</div>
+      <div className={cn("text-[9px] uppercase tracking-widest font-bold opacity-50", isDark ? "text-white" : "text-black")}>{label}</div>
+    </div>
+    <div className={cn("text-2xl font-bold font-serif", isDark ? "text-white" : "text-slate-900")}>{value}</div>
+    {subValue && <div className={cn("text-xs mt-1 font-mono", isDark ? "text-cyan-400" : "text-cyan-600")}>{subValue}</div>}
+  </motion.div>
+);
+
+// 4. Menu Button
+const MenuButton = ({ icon, title, desc, onClick, variant = "normal", isDark }: any) => (
+  <button onClick={onClick} className={cn("w-full flex items-center gap-4 p-4 rounded-xl border transition-all duration-300 group text-left", variant === "danger" ? "bg-red-500/10 border-red-500/20 hover:bg-red-500/20 hover:border-red-500/40" : isDark ? "bg-white/5 border-white/5 hover:bg-white/10 hover:border-cyan-500/30" : "bg-white/50 border-black/5 hover:bg-white hover:border-cyan-500/30")}>
+    <div className={cn("w-10 h-10 rounded-full flex items-center justify-center text-lg transition-transform group-hover:scale-110", variant === "danger" ? "bg-red-500/20 text-red-400" : isDark ? "bg-white/5 text-cyan-300" : "bg-black/5 text-slate-700")}>{icon}</div>
+    <div className="flex-1">
+      <h3 className={cn("text-sm font-bold uppercase tracking-wide", variant === "danger" ? "text-red-400" : isDark ? "text-white" : "text-slate-900")}>{title}</h3>
+      <p className={cn("text-[10px] opacity-60", variant === "danger" ? "text-red-300" : isDark ? "text-gray-400" : "text-gray-600")}>{desc}</p>
+    </div>
+    <div className={cn("text-xs opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all", variant === "danger" ? "text-red-400" : "text-cyan-500")}>➜</div>
+  </button>
+);
+
+// --- MAIN PAGE ---
+
+export default function DashboardPage() {
   const router = useRouter();
-  const [user, setUser] = useState<any>(null);
-  const [history, setHistory] = useState<any[]>([]);
+
+  // System State
+  const [scene, setScene] = useState<"underwater" | "snow">("underwater");
+  const [theme, setTheme] = useState<"dark" | "light">("dark");
+  const [isLiteMode, setIsLiteMode] = useState(false);
+  const [mounted, setMounted] = useState(false);
   const [loading, setLoading] = useState(true);
+
+  // User Data State
+  const [userData, setUserData] = useState<any>(null);
+  const [history, setHistory] = useState<any[]>([]);
+
+  // Modals State
+  const [showEditProfile, setShowEditProfile] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [showPrivileges, setShowPrivileges] = useState(false);
   
-  // States
-  const [isEditing, setIsEditing] = useState(false);
-  const [editData, setEditData] = useState({ nickname: "", phone: "", address: "", lineId: "" });
-  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  // 🆕 Image Preview State
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
+
+  // Form State & Upload
+  const [editForm, setEditForm] = useState({ realName: "", nickname: "", phone: "", address: "", lineId: "" });
+  const [newProfileImage, setNewProfileImage] = useState<File | null>(null); // สำหรับเก็บไฟล์รูปใหม่
+  const [previewProfileUrl, setPreviewProfileUrl] = useState<string | null>(null); // สำหรับพรีวิวรูปก่อนเซฟ
+  const [saving, setSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  
-  // Modals
-  const [viewTransaction, setViewTransaction] = useState<any>(null);
-  const [showVipModal, setShowVipModal] = useState(false); // ✅ State สำหรับเปิดดูตาราง VIP
 
-  // --- 1. AUTH & DATA FETCHING ---
+  // VIP Logic (Calculated from Total Spent - Full Amount)
+  const vipStatus = useMemo(() => {
+    const spent = userData?.totalSpent || 0;
+    const currentTier = [...VIP_TIERS].reverse().find(t => spent >= t.minSpend) || VIP_TIERS[0];
+    const nextTier = VIP_TIERS.find(t => t.minSpend > spent);
+    const needed = nextTier ? nextTier.minSpend - spent : 0;
+    return {
+      currentLevel: currentTier.level,
+      currentDiscount: (currentTier.discount * 100).toFixed(0),
+      nextLevel: nextTier ? nextTier.level : "MAX",
+      needed: needed,
+    };
+  }, [userData?.totalSpent]);
+
+  // Auth & Fetch Data
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      if (!currentUser) {
-        router.push("/login");
-        return;
-      }
+    const savedScene = localStorage.getItem("croc_scene");
+    const savedTheme = localStorage.getItem("croc_theme");
+    const savedLite = localStorage.getItem("croc_lite_mode");
 
-      try {
-        const docRef = doc(db, "users", currentUser.uid);
-        const docSnap = await getDoc(docRef);
+    if (savedScene) setScene(savedScene as any);
+    if (savedTheme) setTheme(savedTheme as any);
+    if (savedLite) setIsLiteMode(savedLite === "true");
 
-        if (docSnap.exists()) {
-          const userData = docSnap.data();
-          setUser({ id: docSnap.id, ...userData });
-          setEditData({
-            nickname: userData.nickname || "",
-            phone: userData.phone || "",
-            address: userData.address || "",
-            lineId: userData.lineId || ""
-          });
-          setPhotoPreview(userData.photoURL || null);
-
-          const q = query(collection(db, "transactions"), where("userId", "==", currentUser.uid), orderBy("timestamp", "desc"));
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        try {
+          // Get User Data
+          const docRef = doc(db, "users", user.uid);
+          const docSnap = await getDoc(docRef);
+          if (docSnap.exists()) {
+            const data = docSnap.data();
+            setUserData({ ...data, uid: user.uid });
+            setEditForm({
+              realName: data.realName || "",
+              nickname: data.nickname || "",
+              phone: data.phone || "",
+              address: data.address || "",
+              lineId: data.lineId || ""
+            });
+          }
+          // Get History
+          const q = query(collection(db, "transactions"), where("userId", "==", user.uid), orderBy("timestamp", "desc"));
           const historySnap = await getDocs(q);
-          setHistory(historySnap.docs.map(d => ({ id: d.id, ...d.data() })));
-        } else {
-          alert("ไม่พบข้อมูลสมาชิก กรุณาติดต่อ Admin");
-          router.push("/login");
+          setHistory(historySnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+        } catch (error) {
+          console.error("Data error:", error);
+        } finally {
+          setLoading(false);
+          setMounted(true);
         }
-      } catch (error) {
-        console.error("Error fetching data:", error);
-      } finally {
-        setLoading(false);
+      } else {
+        router.push("/login");
       }
     });
-
     return () => unsubscribe();
   }, [router]);
 
-  // --- 2. LOGIC ---
+  // Actions
   const handleLogout = async () => {
     await signOut(auth);
     router.push("/login");
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      if (file.size > 5 * 1024 * 1024) { 
-         alert("ไฟล์รูปใหญ่เกินไปครับ (ขอไม่เกิน 5 MB)");
-         return;
-      }
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setPhotoPreview(reader.result as string);
-      };
-      reader.readAsDataURL(file);
+  const toggleLiteMode = () => {
+    setIsLiteMode(prev => {
+      const newVal = !prev;
+      localStorage.setItem("croc_lite_mode", String(newVal));
+      return newVal;
+    });
+  };
+
+  // 🆕 Handle Image Selection
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      setNewProfileImage(file);
+      setPreviewProfileUrl(URL.createObjectURL(file)); // สร้าง URL ชั่วคราวเพื่อแสดงผล
     }
   };
 
-  const handleSaveProfile = async (e: React.FormEvent) => {
+  // 🆕 Update Profile (with Image Upload)
+  const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user) return;
+    if (!userData?.uid) return;
+    setSaving(true);
     try {
-      await updateDoc(doc(db, "users", user.id), {
-        ...editData,
-        photoURL: photoPreview,
-        lastUpdated: serverTimestamp()
-      });
-      setUser({ ...user, ...editData, photoURL: photoPreview }); 
-      setIsEditing(false);
-      alert("บันทึกข้อมูลเรียบร้อยครับ! 📝");
-    } catch (error: any) {
-      if (error.code === 'permission-denied') {
-         alert("บันทึกไม่สำเร็จ: รูปภาพอาจใหญ่เกินไปสำหรับฐานข้อมูล");
-      } else {
-         alert("เกิดข้อผิดพลาด: " + error.message);
+      let photoURL = userData.photoURL;
+
+      // ถ้ามีการเลือกรูปใหม่ ให้อัปโหลดไป Firebase Storage
+      if (newProfileImage) {
+        const storage = getStorage(); // เรียกใช้ Storage
+        const storageRef = ref(storage, `profile_images/${userData.uid}/${Date.now()}_${newProfileImage.name}`);
+        await uploadBytes(storageRef, newProfileImage);
+        photoURL = await getDownloadURL(storageRef); // ได้ URL รูปใหม่มา
       }
+
+      // อัปเดตข้อมูลใน Firestore
+      await updateDoc(doc(db, "users", userData.uid), { 
+        ...editForm,
+        photoURL: photoURL 
+      });
+
+      setUserData({ ...userData, ...editForm, photoURL });
+      setShowEditProfile(false);
+      setNewProfileImage(null); // Reset
+      alert("✅ Profile updated!");
+    } catch (error) { 
+      console.error(error);
+      alert("Update failed"); 
     }
+    setSaving(false);
   };
 
-  // Logic คำนวณ Level และ Progress
-  const currentLevel = user?.vipLevel || 0;
-  // หา Tier ถัดไป (ที่มี minSpend มากกว่า spend ปัจจุบัน)
-  const nextTier = VIP_TIERS.find(t => t.minSpend > (user?.totalSpent || 0));
-  
-  // คำนวณ % หลอดพลัง
-  let progressPercent = 100;
-  if (nextTier) {
-    const prevTierSpend = VIP_TIERS[currentLevel]?.minSpend || 0;
-    const gap = nextTier.minSpend - prevTierSpend;
-    const currentProgress = (user?.totalSpent || 0) - prevTierSpend;
-    progressPercent = Math.min(100, Math.max(0, (currentProgress / gap) * 100));
-    
-    // กรณี user spend ต่ำกว่า MinSpend ของ Level ปัจจุบัน (เช่น admin ปรับลด manual)
-    if(user?.totalSpent < prevTierSpend) progressPercent = 0;
-  }
-
-  if (loading) return (
-    <MagicBackground>
-      <div className="flex flex-col h-screen justify-center items-center text-cyan-400 gap-4">
-        <div className="text-4xl animate-bounce">🦈</div>
-        <p className="animate-pulse tracking-widest uppercase text-xs">Sonar Scanning...</p>
-      </div>
-    </MagicBackground>
-  );
+  if (!mounted) return null;
+  const isDark = theme === "dark";
 
   return (
-    <MagicBackground>
-      <div className="container mx-auto p-4 md:p-8 max-w-5xl">
+    <div className={cn("min-h-[100dvh] w-screen overflow-x-hidden relative flex flex-col items-center p-4 lg:p-10 transition-colors duration-500", isDark ? "bg-[#020617] text-white" : "bg-slate-50 text-slate-900")}>
+      
+      {/* Background Logic */}
+      <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden">
+        {!isLiteMode ? (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 1 }}>
+              {scene === "underwater" && <UnderwaterBackground intensity={0.5} speed={0.2} />}
+              {scene === "snow" && <SnowBackground count={50} intensity={0.4} speed={0.3} />}
+          </motion.div>
+        ) : (
+          <div className={cn("absolute inset-0 transition-colors duration-500", isDark ? (scene === "underwater" ? "bg-gradient-to-b from-[#001a2c] to-[#000]" : "bg-gradient-to-b from-[#0f172a] to-[#000]") : "bg-gradient-to-b from-slate-100 to-white")} />
+        )}
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,transparent_0%,rgba(0,0,0,0.8)_100%)] z-1" />
+      </div>
+
+      <TopRightControls scene={scene} setScene={(s:any) => { setScene(s); localStorage.setItem("croc_scene", s); }} theme={theme} setTheme={(t:any) => { setTheme(t); localStorage.setItem("croc_theme", t); }} isLite={isLiteMode} toggleLite={toggleLiteMode} goHome={() => router.push("/services")} />
+
+      <div className="relative z-10 w-full max-w-5xl mx-auto pt-16 lg:pt-12">
         
-        {/* --- HEADER --- */}
-        <header className="flex justify-between items-center mb-8">
-          <div className="flex items-center gap-4">
-            <div className="w-14 h-14 rounded-full border-2 border-cyan-400 overflow-hidden bg-black/50 shadow-[0_0_15px_rgba(34,211,238,0.5)]">
-               {user.photoURL ? (
-                 <img src={user.photoURL} alt="Profile" className="w-full h-full object-cover" />
-               ) : (
-                 <div className="w-full h-full flex items-center justify-center text-2xl">👨‍✈️</div>
-               )}
+        {/* Header Profile */}
+        <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col md:flex-row md:items-end justify-between mb-8 pb-6 border-b border-white/10">
+          <div className="flex items-center gap-6">
+            <div className={cn("w-20 h-20 rounded-2xl flex items-center justify-center text-4xl shadow-2xl border overflow-hidden", isDark ? "bg-[#002b36] border-cyan-500/30 text-cyan-400" : "bg-white border-slate-200 text-slate-700")}>
+              {userData?.photoURL ? <img src={userData.photoURL} className="w-full h-full object-cover"/> : "🦈"}
             </div>
             <div>
-              <h1 className="font-serif text-2xl md:text-3xl text-white drop-shadow-[0_0_10px_rgba(34,211,238,0.8)]">
-                Ahoy, <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-emerald-400">{user.nickname || user.name}</span>
-              </h1>
-              <p className="text-cyan-200/60 text-xs uppercase tracking-[0.3em] mt-1">Captain's Bridge</p>
+              <div className={cn("text-xs font-bold uppercase tracking-widest mb-1", isDark ? "text-cyan-500" : "text-cyan-700")}>Command Center</div>
+              <h1 className="text-3xl md:text-4xl font-serif font-black">{userData?.nickname || userData?.realName || "Diver"}</h1>
+              <p className={cn("text-sm mt-1 opacity-60", isDark ? "text-gray-300" : "text-gray-600")}>Level {vipStatus.currentLevel} • {userData?.email}</p>
             </div>
           </div>
-          
-          <button onClick={handleLogout} className="px-5 py-2.5 rounded-full border border-red-500 bg-red-500/10 text-red-400 text-xs font-bold hover:bg-red-500 hover:text-white transition-all uppercase tracking-widest shadow-[0_0_15px_rgba(239,68,68,0.3)]">
-            Abandon Ship
-          </button>
-        </header>
+        </motion.div>
 
-        {/* --- DASHBOARD GRID --- */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          
-          {/* 1. VIP CARD (Left Column) */}
-          <div className="lg:col-span-1 space-y-6">
-            
-            {/* Holographic Card */}
-            <div className="relative overflow-hidden rounded-[2rem] p-6 border border-cyan-500/30 bg-gradient-to-br from-[#002b36]/90 to-[#000]/90 backdrop-blur-xl shadow-[0_0_30px_rgba(8,145,178,0.2)] group">
-               <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-tr from-transparent via-white/5 to-transparent skew-x-12 opacity-0 group-hover:opacity-100 transition-opacity duration-700 pointer-events-none" />
-               
-               <div className="flex justify-between items-start mb-8">
-                 <div className="w-12 h-12 rounded-full bg-cyan-500/20 flex items-center justify-center text-2xl border border-cyan-400/50">
-                   👑
-                 </div>
-                 <div className="text-right">
-                   <p className="text-[10px] text-cyan-400 uppercase tracking-widest">Member ID</p>
-                   <p className="font-mono text-xs text-white/50">{user.id.slice(0, 8)}...</p>
-                 </div>
-               </div>
-
-               <div className="mb-2">
-                 <p className="text-sm text-gray-400 uppercase tracking-widest">Total Contribution</p>
-                 <p className="text-4xl font-mono font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-200 via-yellow-400 to-yellow-600">
-                   ฿{user.totalSpent?.toLocaleString()}
-                 </p>
-               </div>
-
-               <div className="mt-6 pt-6 border-t border-white/10">
-                 <div className="flex justify-between text-xs mb-2">
-                   <span className="text-cyan-400 font-bold">VIP {currentLevel}</span>
-                   {/* ✅ ปุ่มดูสิทธิพิเศษ */}
-                   <button onClick={() => setShowVipModal(true)} className="text-[10px] bg-white/10 hover:bg-white/20 px-2 py-1 rounded text-yellow-300 transition flex items-center gap-1">
-                     🎁 View Privileges
-                   </button>
-                 </div>
-                 
-                 {/* Progress Bar */}
-                 <div className="h-2 w-full bg-black/50 rounded-full overflow-hidden border border-white/10 mt-2">
-                   <div className="h-full bg-gradient-to-r from-cyan-500 to-emerald-400 shadow-[0_0_10px_currentColor]" style={{ width: `${progressPercent}%` }} />
-                 </div>
-                 
-                 <p className="text-[10px] text-gray-500 text-right mt-1">
-                    {nextTier ? `Next: VIP ${nextTier.level} (${nextTier.minSpend.toLocaleString()})` : "MAX LEVEL"}
-                 </p>
-               </div>
-            </div>
-
-            {/* Profile Info (Mini) */}
-            <div className="bg-white/5 p-6 rounded-3xl border border-white/10 text-sm space-y-3">
-               <div className="flex justify-between items-center mb-2">
-                 <h3 className="text-cyan-400 uppercase tracking-widest font-bold">Personal Data</h3>
-                 <button onClick={() => setIsEditing(true)} className="text-[10px] bg-white/10 hover:bg-white/20 px-2 py-1 rounded text-white transition">EDIT</button>
-               </div>
-               <div className="flex justify-between border-b border-white/5 pb-2">
-                 <span className="opacity-50">Real Name</span>
-                 <span className="text-white">{user.realName}</span>
-               </div>
-               <div className="flex justify-between border-b border-white/5 pb-2">
-                 <span className="opacity-50">Phone</span>
-                 <span className="text-white">{user.phone}</span>
-               </div>
-               <div className="flex justify-between border-b border-white/5 pb-2">
-                 <span className="opacity-50">Email</span>
-                 <span className="text-white truncate max-w-[150px]">{user.email}</span>
-               </div>
-               <div className="pt-1">
-                 <p className="opacity-50 mb-1">Shipping Address</p>
-                 <p className="text-white/80 text-xs leading-relaxed">{user.address || "-"}</p>
-               </div>
-            </div>
-
-          </div>
-
-          {/* 2. HISTORY TABLE */}
-          <div className="lg:col-span-2">
-            <div className="bg-[#001219]/80 backdrop-blur-2xl rounded-[2rem] border border-cyan-500/20 shadow-2xl overflow-hidden h-full flex flex-col min-h-[500px]">
-              
-              <div className="p-6 border-b border-cyan-500/10 flex justify-between items-center bg-black/20">
-                <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                  <span className="text-cyan-400">📜</span> Mission Log
-                </h2>
-                <span className="text-[10px] bg-cyan-900/30 text-cyan-400 px-3 py-1 rounded-full border border-cyan-500/20">
-                  {history.length} Records
-                </span>
+        {loading ? (
+           <div className="flex items-center justify-center h-64"><motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: "linear" }} className="text-3xl">⚙️</motion.div></div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div className="lg:col-span-2 space-y-6">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <StatCard isDark={isDark} delay={0.1} icon="👑" label="VIP Level" value={`LVL ${vipStatus.currentLevel}`} subValue={vipStatus.nextLevel !== "MAX" ? `Next: ฿${vipStatus.needed.toLocaleString()}` : "Max Level Reached"} />
+                {/* Total Spent shows the accumulated amount (full price) */}
+                <StatCard isDark={isDark} delay={0.2} icon="💎" label="Total Accumulated" value={`฿${(userData?.totalSpent || 0).toLocaleString()}`} subValue={`Current Discount: ${vipStatus.currentDiscount}%`} />
+                <StatCard isDark={isDark} delay={0.3} icon="💰" label="Transactions" value={history.length} subValue="Total Hires" />
               </div>
 
-              <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
-                <table className="w-full text-left border-collapse">
-                  <thead className="text-[10px] uppercase tracking-widest text-cyan-500/60 border-b border-white/5">
-                    <tr>
-                      <th className="p-4">Date</th>
-                      <th className="p-4">Mission</th>
-                      <th className="p-4 text-right">Amount</th>
-                      <th className="p-4 text-center">Detail</th>
-                    </tr>
-                  </thead>
-                  <tbody className="text-sm">
-                    {history.length > 0 ? (
-                      history.map((h) => (
-                        <tr key={h.id} className="hover:bg-white/5 transition-colors border-b border-white/5 last:border-0 group cursor-pointer" onClick={() => setViewTransaction(h)}>
-                          <td className="p-4 font-mono opacity-60 text-xs">
-                            {h.timestamp?.toDate().toLocaleDateString('th-TH')} <br/>
-                            <span className="text-[9px] opacity-50">{h.timestamp?.toDate().toLocaleTimeString('th-TH')}</span>
-                          </td>
-                          <td className="p-4 text-white group-hover:text-cyan-200 transition-colors">{h.note}</td>
-                          <td className="p-4 text-right font-mono font-bold text-emerald-400">+{h.amount.toLocaleString()}</td>
-                          <td className="p-4 text-center">
-                            <span className="text-xs bg-white/10 px-2 py-1 rounded text-cyan-400 group-hover:bg-cyan-500 group-hover:text-black transition">VIEW</span>
-                          </td>
-                        </tr>
-                      ))
-                    ) : (
-                      <tr><td colSpan={4} className="p-10 text-center text-white/30 italic">No missions found...</td></tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-
+              {/* Profile Card */}
+              <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.4 }} className={cn("p-8 rounded-3xl border backdrop-blur-md shadow-xl", isDark ? "bg-[#001a2c]/60 border-white/10" : "bg-white/80 border-slate-200")}>
+                <div className="flex justify-between items-center mb-6">
+                   <h3 className="text-lg font-bold font-serif uppercase tracking-wider">My Profile (KYC)</h3>
+                   <button onClick={() => setShowEditProfile(true)} className="text-xs text-cyan-500 hover:text-cyan-400 font-bold uppercase tracking-widest border border-cyan-500/30 px-3 py-1 rounded-full hover:bg-cyan-500/10 transition-colors">Edit Profile ✏️</button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-y-6 gap-x-8">
+                  {[ { l: "Real Name", v: userData?.realName }, { l: "Nickname", v: userData?.nickname }, { l: "Phone", v: userData?.phone }, { l: "Line ID", v: userData?.lineId }, { l: "Address", v: userData?.address }, { l: "Email", v: userData?.email } ].map((item, i) => (
+                    <div key={i} className="group">
+                      <div className={cn("text-[10px] uppercase tracking-widest opacity-40 mb-1", isDark ? "text-white" : "text-black")}>{item.l}</div>
+                      <div className={cn("font-medium border-b pb-2 transition-colors", isDark ? "border-white/5 group-hover:border-cyan-500/50" : "border-black/5 group-hover:border-cyan-500/50")}>{item.v || "-"}</div>
+                    </div>
+                  ))}
+                </div>
+              </motion.div>
             </div>
-          </div>
 
-        </div>
-
-        {/* --- MODAL 1: EDIT PROFILE --- */}
-        {isEditing && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm" onClick={() => setIsEditing(false)}>
-            <div className="bg-[#0f172a] border border-cyan-500/30 p-8 rounded-3xl w-full max-w-md shadow-2xl relative" onClick={e => e.stopPropagation()}>
-              <h3 className="text-xl font-bold text-white mb-6 flex items-center gap-2">📝 Edit Profile</h3>
-              <form onSubmit={handleSaveProfile} className="space-y-4">
-                
-                <div className="flex flex-col items-center mb-6">
-                   <div className="relative w-24 h-24 rounded-full border-2 border-cyan-500 overflow-hidden bg-black/50 group cursor-pointer" onClick={() => fileInputRef.current?.click()}>
-                      {photoPreview ? (
-                        <img src={photoPreview} alt="Preview" className="w-full h-full object-cover" />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center text-4xl">👨‍✈️</div>
-                      )}
-                      <div className="absolute inset-0 bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                         <span className="text-white text-xs font-bold">CHANGE</span>
-                      </div>
-                   </div>
-                   <input type="file" ref={fileInputRef} onChange={handleFileChange} accept="image/*" className="hidden" />
-                   <p className="text-[10px] text-gray-500 mt-2">Click to upload (Max 5MB)</p>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-xs uppercase text-cyan-500">Nickname</label>
-                  <input type="text" value={editData.nickname} onChange={e => setEditData({...editData, nickname: e.target.value})} 
-                    className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-white focus:border-cyan-400 outline-none" required />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-xs uppercase text-cyan-500">Phone</label>
-                  <input type="tel" value={editData.phone} onChange={e => setEditData({...editData, phone: e.target.value.replace(/[^0-9]/g, "")})} maxLength={10}
-                    className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-white focus:border-cyan-400 outline-none" required />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-xs uppercase text-cyan-500">LINE ID</label>
-                  <input type="text" value={editData.lineId} onChange={e => setEditData({...editData, lineId: e.target.value})} 
-                    className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-white focus:border-cyan-400 outline-none" />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-xs uppercase text-cyan-500">Address</label>
-                  <textarea rows={3} value={editData.address} onChange={e => setEditData({...editData, address: e.target.value})} 
-                    className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-white focus:border-cyan-400 outline-none" />
-                </div>
-
-                <div className="flex gap-3 pt-4">
-                  <button type="button" onClick={() => setIsEditing(false)} className="flex-1 py-3 rounded-xl border border-red-500/30 text-red-400 hover:bg-red-900/20">Cancel</button>
-                  <button type="submit" className="flex-1 py-3 rounded-xl bg-cyan-600 text-white font-bold hover:bg-cyan-500 shadow-[0_0_15px_rgba(8,145,178,0.4)]">Save</button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
-
-        {/* --- MODAL 2: TRANSACTION DETAIL (Slip & Work) --- */}
-        {viewTransaction && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-md" onClick={() => setViewTransaction(null)}>
-            <div className="bg-[#001a2c] border border-cyan-500/50 p-0 rounded-3xl w-full max-w-4xl shadow-[0_0_50px_rgba(8,145,178,0.3)] relative overflow-hidden flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
+            <div className="space-y-4">
+               <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.5 }} className="flex flex-col gap-3">
+                 <div className="text-xs font-bold uppercase tracking-widest opacity-40 mb-2 pl-2">System Menu</div>
+                 <MenuButton isDark={isDark} icon="📜" title="History" desc="View slips & finished works" onClick={() => setShowHistory(true)} />
+                 <MenuButton isDark={isDark} icon="⭐" title="Privileges" desc="View VIP Tiers & Discounts" onClick={() => setShowPrivileges(true)} />
+                 {/* Removed Support Button as requested */}
+                 <div className="h-4" /> 
+                 <MenuButton isDark={isDark} variant="danger" icon="🛑" title="Sign Out" desc="End session" onClick={handleLogout} />
+               </motion.div>
                
-               <div className="p-6 border-b border-cyan-500/20 bg-gradient-to-r from-[#002b36] to-black flex justify-between items-center">
-                  <div>
-                    <h3 className="text-xl font-bold text-cyan-400 flex items-center gap-2">📂 Mission Report</h3>
-                    <p className="text-xs text-gray-400 font-mono mt-1">Date: {viewTransaction.timestamp?.toDate().toLocaleString('th-TH')}</p>
-                  </div>
-                  <button onClick={() => setViewTransaction(null)} className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-white hover:bg-red-500 transition">✕</button>
-               </div>
-
-               <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
-                  <div className="mb-6 p-4 rounded-xl bg-cyan-900/20 border border-cyan-500/20 flex justify-between items-center">
-                     <div>
-                       <p className="text-[10px] uppercase text-cyan-500 tracking-widest">Mission Name</p>
-                       <p className="text-white font-medium text-lg">{viewTransaction.note}</p>
-                     </div>
-                     <div className="text-right">
-                       <p className="text-[10px] uppercase text-cyan-500 tracking-widest">Value</p>
-                       <p className="text-emerald-400 font-mono font-bold text-2xl">+{viewTransaction.amount.toLocaleString()}</p>
-                     </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                     <div className="space-y-3">
-                        <h4 className="text-sm font-bold text-gray-300 uppercase tracking-widest flex items-center gap-2">🧾 Payment Evidence</h4>
-                        <div className="aspect-[3/4] bg-black/40 rounded-2xl border-2 border-dashed border-gray-700 flex items-center justify-center overflow-hidden relative group">
-                           {viewTransaction.paymentSlip ? (
-                             <>
-                               <img src={viewTransaction.paymentSlip} alt="Slip" className="w-full h-full object-contain" />
-                               <a href={viewTransaction.paymentSlip} target="_blank" className="absolute bottom-4 right-4 bg-black/70 px-3 py-1 text-xs text-white rounded-full opacity-0 group-hover:opacity-100 transition">🔍 Zoom</a>
-                             </>
-                           ) : (
-                             <div className="text-center text-gray-500">
-                               <div className="text-4xl mb-2">🚫</div>
-                               <p className="text-xs">No Slip Uploaded</p>
-                             </div>
-                           )}
-                        </div>
-                     </div>
-
-                     <div className="space-y-3">
-                        <h4 className="text-sm font-bold text-cyan-400 uppercase tracking-widest flex items-center gap-2">🎁 Mission Output (Received)</h4>
-                        <div className="aspect-[3/4] bg-black/40 rounded-2xl border-2 border-cyan-500/30 flex items-center justify-center overflow-hidden relative group">
-                           {viewTransaction.workImage ? (
-                             <>
-                               <img src={viewTransaction.workImage} alt="Work" className="w-full h-full object-contain" />
-                               <a href={viewTransaction.workImage} target="_blank" className="absolute bottom-4 right-4 bg-cyan-600 px-3 py-1 text-xs text-white rounded-full opacity-0 group-hover:opacity-100 transition shadow-lg">⬇ Download</a>
-                             </>
-                           ) : (
-                             <div className="text-center text-gray-500">
-                               <div className="text-4xl mb-2 animate-pulse">⏳</div>
-                               <p className="text-xs">Mission in Progress...</p>
-                               <p className="text-[10px] opacity-50">(Wait for admin update)</p>
-                             </div>
-                           )}
-                        </div>
-                     </div>
-                  </div>
-               </div>
+               {/* Promo Card */}
+               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.6 }} className="mt-6 p-5 rounded-2xl bg-gradient-to-br from-cyan-600 to-blue-700 text-white shadow-lg relative overflow-hidden group cursor-pointer" onClick={() => setShowPrivileges(true)}>
+                 <div className="absolute top-0 right-0 p-3 opacity-20 text-6xl transform rotate-12 group-hover:scale-110 transition-transform">🦈</div>
+                 <div className="relative z-10">
+                   <div className="text-[10px] font-black uppercase bg-white/20 inline-block px-2 py-0.5 rounded mb-2">{vipStatus.currentLevel > 0 ? `VIP LEVEL ${vipStatus.currentLevel}` : "MEMBER"}</div>
+                   <h3 className="font-bold text-lg leading-tight">Next Reward: {(vipStatus.nextLevel !== "MAX") ? `Level ${vipStatus.nextLevel}` : "Maxed Out!"}</h3>
+                   <p className="text-xs opacity-80 mt-1 mb-3">{vipStatus.nextLevel !== "MAX" ? `Spend ฿${vipStatus.needed.toLocaleString()} more to unlock ${VIP_TIERS.find(t=>t.level === vipStatus.nextLevel)?.discount! * 100}% discount.` : "You are the king of the ocean!"}</p>
+                   <div className="text-xs font-bold underline decoration-white/50 underline-offset-4 group-hover:decoration-white transition-all">View All Tiers &rarr;</div>
+                 </div>
+               </motion.div>
             </div>
           </div>
         )}
-
-        {/* --- ✅ MODAL 3: VIP PRIVILEGES (เพิ่มมาใหม่) --- */}
-        {showVipModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-md" onClick={() => setShowVipModal(false)}>
-             <div className="bg-[#0f172a] border border-[#d4af37]/30 w-full max-w-lg rounded-3xl shadow-[0_0_50px_rgba(212,175,55,0.2)] overflow-hidden flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
-                
-                {/* Header */}
-                <div className="p-6 bg-gradient-to-r from-[#78350f] to-[#451a03] border-b border-[#d4af37]/20 flex justify-between items-center text-white shrink-0">
-                   <div className="flex items-center gap-3">
-                      <div className="text-3xl">💎</div>
-                      <div>
-                        <h3 className="font-serif text-xl font-bold text-[#fef3c7]">VIP Privileges</h3>
-                        <p className="text-xs opacity-70 uppercase tracking-widest">Captain's Benefits</p>
-                      </div>
-                   </div>
-                   <button onClick={() => setShowVipModal(false)} className="w-8 h-8 rounded-full bg-black/20 hover:bg-black/40 flex items-center justify-center transition">✕</button>
-                </div>
-
-                {/* List Content */}
-                <div className="p-6 space-y-3 overflow-y-auto custom-scrollbar">
-                   {VIP_TIERS.slice(1).map((tier) => { // slice(1) เพื่อซ่อน Level 0 (ถ้าต้องการ)
-                      const isCurrent = currentLevel === tier.level;
-                      return (
-                        <div key={tier.level} className={`p-4 rounded-xl border flex justify-between items-center transition-all duration-300
-                           ${isCurrent 
-                             ? 'bg-[#d4af37]/20 border-[#d4af37] shadow-[0_0_15px_rgba(212,175,55,0.3)] scale-105 relative z-10' 
-                             : 'bg-white/5 border-white/10 opacity-70 hover:opacity-100 hover:bg-white/10'}
-                        `}>
-                           <div>
-                              <p className={`font-bold text-sm ${isCurrent ? 'text-[#d4af37]' : 'text-white'}`}>
-                                 VIP {tier.level} 
-                                 {isCurrent && <span className="ml-2 text-[8px] bg-[#d4af37] text-black px-1.5 py-0.5 rounded font-bold">YOU</span>}
-                              </p>
-                              <p className="text-[10px] text-gray-400 mt-0.5">Min Spend: ฿{tier.minSpend.toLocaleString()}</p>
-                           </div>
-                           <div className="text-right">
-                              <span className={`text-lg font-black font-mono ${isCurrent ? 'text-[#d4af37]' : 'text-gray-300'}`}>
-                                 {(tier.discount * 100).toFixed(0)}%
-                              </span>
-                              <p className="text-[8px] uppercase tracking-widest opacity-50">Discount</p>
-                           </div>
-                        </div>
-                      );
-                   })}
-                </div>
-
-             </div>
-          </div>
-        )}
-
       </div>
-    </MagicBackground>
+
+      {/* --- MODAL: EDIT PROFILE (Updated with Image Upload) --- */}
+      <Modal isOpen={showEditProfile} onClose={() => setShowEditProfile(false)} title="Edit Profile" isDark={isDark}>
+         <form onSubmit={handleUpdateProfile} className="space-y-6">
+            
+            {/* Image Upload Section */}
+            <div className="flex flex-col items-center gap-3">
+               <div className="relative group cursor-pointer" onClick={() => fileInputRef.current?.click()}>
+                 <div className={cn("w-24 h-24 rounded-full border-2 overflow-hidden", isDark ? "border-cyan-500/50" : "border-slate-200")}>
+                    <img src={previewProfileUrl || userData?.photoURL || "https://via.placeholder.com/150"} className="w-full h-full object-cover" />
+                 </div>
+                 <div className="absolute inset-0 bg-black/50 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                    <span className="text-xs text-white font-bold">CHANGE</span>
+                 </div>
+               </div>
+               <input type="file" ref={fileInputRef} onChange={handleImageChange} accept="image/*" className="hidden" />
+               <p className="text-[10px] opacity-50 uppercase">Click image to upload new</p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-1"><label className="text-xs uppercase opacity-50">Real Name</label><input type="text" value={editForm.realName} onChange={e => setEditForm({...editForm, realName: e.target.value})} className={cn("w-full p-3 rounded-xl border bg-transparent outline-none", isDark ? "border-white/20 focus:border-cyan-500" : "border-black/10 focus:border-cyan-500")} /></div>
+              <div className="space-y-1"><label className="text-xs uppercase opacity-50">Nickname</label><input type="text" value={editForm.nickname} onChange={e => setEditForm({...editForm, nickname: e.target.value})} className={cn("w-full p-3 rounded-xl border bg-transparent outline-none", isDark ? "border-white/20 focus:border-cyan-500" : "border-black/10 focus:border-cyan-500")} /></div>
+              <div className="space-y-1"><label className="text-xs uppercase opacity-50">Phone</label><input type="tel" value={editForm.phone} onChange={e => setEditForm({...editForm, phone: e.target.value})} className={cn("w-full p-3 rounded-xl border bg-transparent outline-none", isDark ? "border-white/20 focus:border-cyan-500" : "border-black/10 focus:border-cyan-500")} /></div>
+              <div className="space-y-1"><label className="text-xs uppercase opacity-50">Line ID</label><input type="text" value={editForm.lineId} onChange={e => setEditForm({...editForm, lineId: e.target.value})} className={cn("w-full p-3 rounded-xl border bg-transparent outline-none", isDark ? "border-white/20 focus:border-cyan-500" : "border-black/10 focus:border-cyan-500")} /></div>
+              <div className="md:col-span-2 space-y-1"><label className="text-xs uppercase opacity-50">Address</label><textarea value={editForm.address} onChange={e => setEditForm({...editForm, address: e.target.value})} rows={3} className={cn("w-full p-3 rounded-xl border bg-transparent outline-none", isDark ? "border-white/20 focus:border-cyan-500" : "border-black/10 focus:border-cyan-500")} /></div>
+            </div>
+            <button type="submit" disabled={saving} className="w-full py-3 bg-gradient-to-r from-cyan-600 to-blue-600 text-white rounded-xl font-bold shadow-lg hover:shadow-cyan-500/30 transition-all">{saving ? "Saving..." : "Save Changes"}</button>
+         </form>
+      </Modal>
+
+      {/* --- MODAL: HISTORY --- */}
+      <Modal isOpen={showHistory} onClose={() => setShowHistory(false)} title="Transaction History" isDark={isDark}>
+         <div className="space-y-4">
+            {history.length === 0 ? (<div className="text-center opacity-40 py-10">No transactions found.</div>) : (
+               history.map((item, i) => (
+                 <div key={i} className={cn("p-4 rounded-xl border flex flex-col md:flex-row gap-4 items-start md:items-center", isDark ? "bg-white/5 border-white/10" : "bg-white border-slate-200")}>
+                    <div className="flex-1">
+                       <div className="text-[10px] opacity-50 font-mono">{item.timestamp?.toDate().toLocaleString()}</div>
+                       <div className="font-bold text-lg">{item.note}</div>
+                       {/* Display the full amount (points) */}
+                       <div className={cn("font-mono font-bold text-xl", isDark ? "text-emerald-400" : "text-emerald-600")}>+{Number(item.amount).toLocaleString()}</div>
+                    </div>
+                    {/* ✅ UPDATED: Buttons trigger modal preview instead of new tab */}
+                    <div className="flex gap-2 w-full md:w-auto">
+                       {item.paymentSlip ? (
+                          <button onClick={() => setPreviewImage(item.paymentSlip)} className="flex-1 md:flex-none text-center text-xs bg-orange-500/10 text-orange-500 border border-orange-500/30 px-3 py-2 rounded-lg hover:bg-orange-500 hover:text-white transition-all">🧾 View Slip</button>
+                       ) : <span className="text-xs opacity-30 px-3 py-2">No Slip</span>}
+                       {item.workImage ? (
+                          <button onClick={() => setPreviewImage(item.workImage)} className="flex-1 md:flex-none text-center text-xs bg-cyan-500/10 text-cyan-500 border border-cyan-500/30 px-3 py-2 rounded-lg hover:bg-cyan-500 hover:text-white transition-all">🎁 View Work</button>
+                       ) : <span className="text-xs opacity-30 px-3 py-2">No Work</span>}
+                    </div>
+                 </div>
+               ))
+            )}
+         </div>
+      </Modal>
+
+      {/* --- MODAL: PRIVILEGES --- */}
+      <Modal isOpen={showPrivileges} onClose={() => setShowPrivileges(false)} title="VIP Privileges" isDark={isDark}>
+          <table className="w-full text-sm">
+             <thead className={cn("text-[10px] uppercase tracking-widest border-b", isDark ? "border-white/10 text-gray-400" : "border-black/10 text-gray-500")}>
+                <tr><th className="py-3 text-left">Level</th><th className="py-3 text-right">Min Spend</th><th className="py-3 text-right">Discount</th></tr>
+             </thead>
+             <tbody className="divide-y divide-white/10">
+                {VIP_TIERS.map((tier) => (
+                   <tr key={tier.level} className={cn("transition-colors", vipStatus.currentLevel === tier.level ? (isDark ? "bg-cyan-500/20 text-cyan-300" : "bg-cyan-100 text-cyan-700") : "")}>
+                      <td className="py-3 font-bold px-2">{tier.level === 0 ? "MEMBER" : `VIP ${tier.level}`}{vipStatus.currentLevel === tier.level && <span className="ml-2 text-[9px] bg-cyan-500 text-black px-1 rounded">YOU</span>}</td>
+                      <td className="py-3 text-right font-mono opacity-70">฿{tier.minSpend.toLocaleString()}</td>
+                      <td className="py-3 text-right font-bold text-emerald-400">{(tier.discount * 100).toFixed(0)}% OFF</td>
+                   </tr>
+                ))}
+             </tbody>
+          </table>
+      </Modal>
+
+      {/* --- 🆕 IMAGE VIEWER MODAL (LIGHTBOX) --- */}
+      <AnimatePresence>
+        {previewImage && (
+          <motion.div 
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[200] bg-black/90 flex items-center justify-center p-4 backdrop-blur-md cursor-pointer"
+            onClick={() => setPreviewImage(null)}
+          >
+             {/* Close Button */}
+             <button className="absolute top-5 right-5 text-white/50 hover:text-white text-4xl transition-colors z-[210]">&times;</button>
+             
+             {/* Image Container */}
+             <motion.img 
+               initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.8, opacity: 0 }}
+               src={previewImage} 
+               className="max-w-full max-h-[90vh] rounded-xl shadow-2xl object-contain border border-white/10"
+               onClick={e => e.stopPropagation()} 
+             />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+    </div>
   );
 }

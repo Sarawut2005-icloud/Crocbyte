@@ -20,10 +20,10 @@ const playfair = Playfair_Display({
 });
 
 export const metadata: Metadata = {
-  title: "CrocByte - Luxury Admin",
-  description: "Premium System by SkizzKat",
+  title: "CrocWork",
+  description: "รับจ้างงาน",
   icons: {
-    icon: "/favicon.ico", // อย่าลืมหารูปไอคอนมาใส่นะครับ
+    icon: "/3b4679f0ac3b7c69684f7683595ab6c8.jpg", // อย่าลืมหารูปไอคอนมาใส่นะครับ
   },
 };
 

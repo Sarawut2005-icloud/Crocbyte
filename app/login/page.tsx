@@ -1,4 +1,5 @@
 "use client";
+
 import { useState, useEffect } from "react";
 import { 
   signInWithPopup, 
@@ -7,166 +8,309 @@ import {
   createUserWithEmailAndPassword,
   signOut 
 } from "firebase/auth";
-import { auth, db } from "../../lib/firebase";
-import { useRouter } from "next/navigation";
+import { auth, db } from "../../lib/firebase"; 
+import { useRouter, useSearchParams } from "next/navigation";
 import { doc, getDoc, setDoc, serverTimestamp, collection, query, where, getDocs } from "firebase/firestore";
-import MagicBackground from "../../components/MagicBackground";
+import { motion, AnimatePresence } from "framer-motion";
 
-// --- 🔔 SHARK NOTIFICATION COMPONENT (แก้ไขตำแหน่ง) ---
-const SeaToast = ({ message, type, show }: { message: string, type: 'success' | 'error', show: boolean }) => {
-  if (!show) return null;
+// --- IMPORTS FROM LANDING PAGE ---
+import { SnowBackground } from "@/components/SnowBackground";
+import { UnderwaterBackground } from "@/components/UnderwaterBackground";
 
-  const isSuccess = type === 'success';
+// --- UTILITIES ---
+const cn = (...classes: (string | undefined | null | boolean)[]) => 
+  classes.filter(Boolean).join(" ");
 
-  return (
-    <div className={`
-      /* ✅ แก้ไขตรงนี้: เลื่อนลงมา top-28 ให้พ้น Navbar และใส่ z-9999 ให้อยู่บนสุด */
-      fixed top-28 left-1/2 -translate-x-1/2 z-[9999]
-      flex items-center gap-4 px-6 py-4 rounded-2xl shadow-[0_20px_50px_-10px_rgba(0,0,0,0.8)]
-      backdrop-blur-2xl border-2 transition-all duration-500 animate-shark-bite min-w-[320px]
-      ${isSuccess 
-        ? "bg-[#002b36]/95 border-emerald-400 text-emerald-100 shadow-[0_0_30px_rgba(52,211,153,0.4)]" 
-        : "bg-[#2b0000]/95 border-red-500 text-red-100 shadow-[0_0_30px_rgba(239,68,68,0.4)]"
-      }
-    `}>
-      {/* Icon */}
-      <div className={`
-        flex-shrink-0 flex items-center justify-center w-12 h-12 rounded-full text-2xl
-        ${isSuccess ? "bg-emerald-500/20 text-emerald-400" : "bg-red-500/20 text-red-400"}
-      `}>
-        {isSuccess ? "🦈" : "🐙"}
-      </div>
+// 🎮 COMPONENT: TOP RIGHT CONTROL BAR
+const TopRightControls = ({ 
+  scene, setScene, 
+  theme, setTheme,
+  isLite, toggleLite, 
+  goHome 
+}: any) => {
+  const isDark = theme === "dark";
 
-      {/* Text */}
-      <div className="flex flex-col flex-1">
-        <h4 className={`text-sm font-black uppercase tracking-widest ${isSuccess ? "text-emerald-400" : "text-red-400"}`}>
-          {isSuccess ? "MISSION COMPLETE" : "SYSTEM ALERT"}
-        </h4>
-        <p className="text-xs font-medium opacity-90">{message}</p>
-      </div>
-
-      {/* Progress Line */}
-      <div className={`absolute bottom-0 left-0 h-[3px] animate-shrink-width
-        ${isSuccess ? "bg-emerald-400" : "bg-red-500"}
-      `} style={{ animationDuration: '3s' }} />
-    </div>
+  // Base styling for mini buttons
+  const btnBase = "relative flex items-center justify-center w-9 h-9 rounded-full transition-all duration-300 backdrop-blur-sm border";
+  
+  const getBtnStyle = (isActive: boolean, activeColor: string) => cn(
+    btnBase,
+    isActive 
+      ? `${activeColor} text-white border-transparent shadow-lg scale-105` 
+      : isDark 
+        ? "bg-white/5 border-white/10 text-white/50 hover:bg-white/10 hover:text-white" 
+        : "bg-black/5 border-black/10 text-black/50 hover:bg-black/10 hover:text-black"
   );
-};
 
-// --- 🎨 SEA INPUT & BUTTON ---
-const SeaButton = ({ children, onClick, loading, error, type = "button", variant = "primary" }: any) => {
-  const isDanger = variant === "danger";
   return (
-    <button
-      type={type}
-      onClick={onClick}
-      disabled={loading}
-      className={`
-        group relative w-full overflow-hidden rounded-2xl p-4 transition-all duration-300
-        ${error 
-          ? "bg-red-500/20 border-red-400 text-red-100 animate-shake" 
-          : isDanger
-            ? "bg-red-500/10 border-red-500/30 text-red-200 hover:bg-red-500/20 hover:border-red-400"
-            : "bg-cyan-500/20 border-cyan-400/30 text-cyan-50 hover:bg-cyan-400/30 hover:shadow-[0_0_20px_rgba(34,211,238,0.4)]"
-        }
-        border backdrop-blur-md flex items-center justify-between
-      `}
+    <motion.div 
+      initial={{ y: -50, opacity: 0 }}
+      animate={{ y: 0, opacity: 1 }}
+      transition={{ delay: 0.2, type: "spring" }}
+      className="fixed top-6 right-6 z-[9999] flex items-center gap-3"
     >
-      <div className={`absolute inset-0 -translate-x-full group-hover:translate-x-full transition-transform duration-700 bg-gradient-to-r from-transparent via-white/10 to-transparent ${error ? 'hidden' : ''}`} />
-      <span className="font-bold tracking-widest uppercase text-sm z-10 pl-2">
-        {loading ? "Processing..." : children}
-      </span>
-      <div className={`
-        relative z-10 w-10 h-10 rounded-full flex items-center justify-center transition-all duration-300
-        ${error ? 'bg-red-500 text-white' : isDanger ? 'bg-red-500/20 text-red-200 group-hover:bg-red-500 group-hover:text-white' : 'bg-cyan-400 text-black group-hover:scale-110 group-hover:translate-x-1'}
-      `}>
-         {loading ? (
-           <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-         ) : error ? (
-           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-         ) : isDanger ? (
-           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
-         ) : (
-           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg>
-         )}
+      {/* Container รวมปุ่ม */}
+      <div className={cn(
+        "flex items-center gap-2 p-2 rounded-full border shadow-2xl backdrop-blur-xl",
+        isDark ? "bg-[#0f172a]/60 border-white/10" : "bg-white/60 border-slate-200"
+      )}>
+        
+        {/* 1. HOME BUTTON */}
+        <button 
+          onClick={goHome}
+          className={getBtnStyle(false, "")}
+          title="Back to Home"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+          </svg>
+        </button>
+
+        <div className="w-[1px] h-5 bg-current opacity-10 mx-1" />
+
+        {/* 2. SCENE TOGGLES */}
+        <div className="flex gap-1">
+          <button 
+            onClick={() => setScene('underwater')}
+            className={getBtnStyle(scene === 'underwater', "bg-cyan-500 shadow-cyan-500/50")}
+            title="Underwater"
+          >
+            🌊
+          </button>
+          <button 
+            onClick={() => setScene('snow')}
+            className={getBtnStyle(scene === 'snow', "bg-blue-600 shadow-blue-600/50")}
+            title="Snow"
+          >
+            ❄️
+          </button>
+        </div>
+
+        <div className="w-[1px] h-5 bg-current opacity-10 mx-1" />
+
+        {/* 3. THEME TOGGLE */}
+        <button 
+          onClick={() => setTheme(isDark ? 'light' : 'dark')}
+          className={getBtnStyle(false, "")}
+          title="Toggle Theme"
+        >
+          {isDark ? "☀️" : "🌙"}
+        </button>
+
+        {/* 4. LITE MODE TOGGLE */}
+        <button 
+          onClick={toggleLite}
+          className={cn(
+            "px-3 h-9 rounded-full flex items-center gap-2 transition-all duration-300 font-bold text-[10px] tracking-widest uppercase border",
+            isLite 
+              ? "bg-yellow-400 border-yellow-400 text-black shadow-[0_0_15px_rgba(250,204,21,0.4)]" 
+              : isDark
+                ? "bg-white/5 border-white/10 text-white/40 hover:text-white"
+                : "bg-black/5 border-black/10 text-black/40 hover:text-black"
+          )}
+        >
+          <span>LITE</span>
+          <div className={cn("w-1.5 h-1.5 rounded-full", isLite ? "bg-black animate-pulse" : "bg-current opacity-30")} />
+        </button>
+
       </div>
-    </button>
+    </motion.div>
   );
 };
 
-const SeaInput = ({ label, type, value, onChange, placeholder, required, maxLength, error, readOnly }: any) => (
-  <div className="space-y-1 group">
-    <label className={`text-[10px] font-bold uppercase tracking-widest transition-colors ml-2
-      ${error ? "text-red-300" : "text-cyan-200/60 group-focus-within:text-cyan-400"}
-    `}>
-      {label} {required && <span className="text-red-400">*</span>}
-    </label>
-    <div className="relative">
-      <input 
-        type={type} 
-        value={value} 
-        onChange={onChange}
-        maxLength={maxLength}
-        readOnly={readOnly}
-        className={`
-          w-full p-4 rounded-xl outline-none transition-all duration-300
-          bg-black/20 backdrop-blur-sm border
-          ${readOnly ? "opacity-50 cursor-not-allowed bg-black/40 text-gray-400 border-gray-600" : ""}
-          ${error 
-            ? "border-red-500/50 text-red-200 placeholder-red-300/30 animate-shake focus:border-red-500 focus:shadow-[0_0_15px_rgba(239,68,68,0.3)]" 
-            : !readOnly && "border-white/10 text-white placeholder-white/20 focus:border-cyan-400/50 focus:bg-black/40 focus:shadow-[0_0_15px_rgba(34,211,238,0.2)]"
-          }
-        `}
-        placeholder={placeholder} 
-      />
-      {!readOnly && (
-        <div className={`absolute bottom-0 left-0 h-[1px] bg-gradient-to-r from-transparent via-cyan-400 to-transparent transition-all duration-500
-          ${error ? 'via-red-500 w-full' : 'w-0 group-focus-within:w-full'}
-        `} />
-      )}
+// ... [MotionToast Component remains same] ...
+const MotionToast = ({ message, type, isVisible, onClose }: any) => {
+    const isSuccess = type === 'success';
+    return (
+      <AnimatePresence>
+        {isVisible && (
+          <motion.div 
+            initial={{ y: -100, x: "-50%", opacity: 0 }}
+            animate={{ y: 0, x: "-50%", opacity: 1 }}
+            exit={{ y: -50, x: "-50%", opacity: 0 }}
+            transition={{ type: "spring", stiffness: 300, damping: 20 }}
+            className={cn(
+              "fixed top-24 left-1/2 z-[9999] flex items-center gap-4 px-6 py-4 rounded-2xl shadow-xl backdrop-blur-xl border border-white/10 min-w-[320px]",
+              isSuccess ? "bg-[#002b36]/95 text-emerald-100" : "bg-[#2b0000]/95 text-red-100"
+            )}
+          >
+            <div className={cn(
+              "flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center text-xl",
+              isSuccess ? "bg-emerald-500/20" : "bg-red-500/20"
+            )}>
+              {isSuccess ? "🦈" : "🐙"}
+            </div>
+            <div className="flex-1">
+              <h4 className={cn("text-xs font-black uppercase tracking-widest", isSuccess ? "text-emerald-400" : "text-red-400")}>
+                {isSuccess ? "SYSTEM READY" : "ACCESS DENIED"}
+              </h4>
+              <p className="text-xs font-medium opacity-80">{message}</p>
+            </div>
+            <motion.div 
+              initial={{ width: "100%" }}
+              animate={{ width: "0%" }}
+              transition={{ duration: 3, ease: "linear" }}
+              onAnimationComplete={onClose}
+              className={cn("absolute bottom-0 left-0 h-[2px]", isSuccess ? "bg-emerald-500" : "bg-red-500")}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+    );
+};
+
+// ... [CrocInput & CrocButton Components remain same] ...
+const CrocInput = ({ label, type, value, onChange, placeholder, required, maxLength, error, readOnly }: any) => (
+    <div className="space-y-1 group">
+      <label className={cn(
+        "text-[9px] font-black uppercase tracking-widest transition-colors ml-2",
+        error ? "text-red-400" : "text-cyan-200/60 group-focus-within:text-cyan-400"
+      )}>
+        {label} {required && <span className="text-red-400">*</span>}
+      </label>
+      <div className="relative">
+        <input 
+          type={type} 
+          value={value} 
+          onChange={onChange}
+          maxLength={maxLength}
+          readOnly={readOnly}
+          className={cn(
+            "w-full p-3.5 rounded-xl outline-none transition-all duration-300 bg-black/20 backdrop-blur-md border",
+            readOnly ? "opacity-50 cursor-not-allowed border-white/5 text-gray-400" : "text-white placeholder-white/20",
+            error 
+              ? "border-red-500/50 focus:shadow-[0_0_15px_rgba(239,68,68,0.3)]" 
+              : "border-white/10 focus:border-cyan-400/50 focus:bg-black/40 focus:shadow-[0_0_15px_rgba(34,211,238,0.2)]"
+          )}
+          placeholder={placeholder} 
+        />
+        {!readOnly && (
+          <motion.div 
+            className={cn("absolute bottom-0 left-0 h-[1px]", error ? "bg-red-500" : "bg-cyan-400")}
+            initial={{ width: "0%" }}
+            animate={{ width: error ? "100%" : "0%" }}
+            whileFocus={{ width: "100%" }}
+            transition={{ duration: 0.3 }}
+          />
+        )}
+      </div>
     </div>
-  </div>
 );
+
+const CrocButton = ({ children, onClick, loading, error, type = "button", variant = "primary" }: any) => {
+    const isDanger = variant === "danger";
+    return (
+      <motion.button
+        type={type}
+        onClick={onClick}
+        disabled={loading}
+        whileHover={{ scale: 1.02 }}
+        whileTap={{ scale: 0.98 }}
+        className={cn(
+          "relative w-full overflow-hidden rounded-xl p-4 transition-all duration-300 border flex items-center justify-between group",
+          error 
+            ? "bg-red-500/20 border-red-500 text-red-100" 
+            : isDanger
+              ? "bg-red-950/30 border-red-500/30 text-red-200 hover:bg-red-900/40"
+              : "bg-cyan-950/30 border-cyan-500/30 text-cyan-50 hover:bg-cyan-900/40 hover:shadow-[0_0_20px_rgba(34,211,238,0.2)]"
+        )}
+      >
+        <span className="font-bold tracking-[0.2em] uppercase text-xs z-10 pl-1">
+          {loading ? "PROCESSING..." : children}
+        </span>
+        <div className={cn(
+          "relative z-10 w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 text-xs",
+          error ? "bg-red-500 text-white" : isDanger ? "bg-red-500/20 text-red-200" : "bg-cyan-400 text-black group-hover:scale-110"
+        )}>
+           {loading ? (
+             <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: "linear" }}>
+               ⚙️
+             </motion.div>
+           ) : error ? "!" : "➜"}
+        </div>
+      </motion.button>
+    );
+};
 
 // --- MAIN PAGE ---
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+
+  // -- STATE: System --
+  const [scene, setScene] = useState<"underwater" | "snow">("underwater");
+  const [theme, setTheme] = useState<"dark" | "light">("dark");
+  const [isLiteMode, setIsLiteMode] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
+  // -- STATE: Auth --
   const [loading, setLoading] = useState(false);
   const [errorState, setErrorState] = useState(false);
-  
-  // 🔔 Toast State
   const [toast, setToast] = useState<{ show: boolean, message: string, type: 'success' | 'error' }>({
     show: false, message: "", type: 'success'
   });
-
-  const [activeTab, setActiveTab] = useState<"google" | "email">("google");
-  const [emailMode, setEmailMode] = useState<"login" | "register">("login");
-  const [showGoogleKYC, setShowGoogleKYC] = useState(false);
+  const [mode, setMode] = useState<"initial" | "email_login" | "email_register" | "google_kyc">("initial");
   const [tempGoogleUser, setTempGoogleUser] = useState<any>(null);
-
   const [formData, setFormData] = useState({
     email: "", password: "", realName: "", nickname: "", 
     phone: "", birthDate: "", address: "", lineId: ""
   });
 
+  // --- INITIALIZATION ---
+  useEffect(() => {
+    // Check URL Params first, then LocalStorage
+    const paramScene = searchParams.get("scene");
+    const paramTheme = searchParams.get("theme");
+    const paramLite = searchParams.get("lite");
+
+    const savedScene = localStorage.getItem("croc_scene");
+    const savedTheme = localStorage.getItem("croc_theme");
+    const savedLite = localStorage.getItem("croc_lite_mode"); // ใช้ key ให้ตรงกันกับหน้าแรก
+
+    if (paramScene) setScene(paramScene as any);
+    else if (savedScene) setScene(savedScene as any);
+
+    if (paramTheme) setTheme(paramTheme as any);
+    else if (savedTheme) setTheme(savedTheme as any);
+
+    if (paramLite) setIsLiteMode(paramLite === "true");
+    else if (savedLite) setIsLiteMode(savedLite === "true");
+
+    setMounted(true);
+  }, [searchParams]);
+
+  // --- HANDLERS: SYSTEM SETTINGS ---
+  const toggleLiteMode = () => {
+    setIsLiteMode(prev => {
+      const newVal = !prev;
+      localStorage.setItem("croc_lite_mode", String(newVal));
+      return newVal;
+    });
+  };
+
+  const handleSceneChange = (newScene: "underwater" | "snow") => {
+    setScene(newScene);
+    localStorage.setItem("croc_scene", newScene);
+  };
+
+  const handleThemeChange = (newTheme: "dark" | "light") => {
+    setTheme(newTheme);
+    localStorage.setItem("croc_theme", newTheme);
+  };
+
+  const handleGoHome = () => {
+    router.push("/"); 
+  };
+
+  // --- HANDLERS: AUTH (Same as before) ---
   const showNotification = (msg: string, type: 'success' | 'error') => {
     setToast({ show: true, message: msg, type });
     if (type === 'error') {
       setErrorState(true);
-      setTimeout(() => setErrorState(false), 1000);
+      setTimeout(() => setErrorState(false), 800);
     }
     setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
-  };
-
-  const checkEmailDuplicate = async (emailToCheck: string) => {
-    try {
-      const q = query(collection(db, "users"), where("email", "==", emailToCheck));
-      const querySnapshot = await getDocs(q);
-      return !querySnapshot.empty;
-    } catch (error) {
-      return false;
-    }
   };
 
   const handleChange = (key: string, val: string) => {
@@ -179,32 +323,20 @@ export default function LoginPage() {
   const validateForm = () => {
     const phoneRegex = /^0[0-9]{9}$/;
     if (!phoneRegex.test(formData.phone)) {
-      showNotification("เบอร์โทรต้องมี 10 หลัก (เริ่มด้วย 0)", "error");
+      showNotification("เบอร์โทรต้องมี 10 หลัก", "error");
       return false;
     }
     const nameRegex = /^[a-zA-Zก-๙\s]+$/;
     if (!nameRegex.test(formData.realName) || formData.realName.trim().length < 3) {
-      showNotification("ชื่อจริงต้องเป็นตัวหนังสือและยาวกว่า 3 ตัวอักษร", "error");
+      showNotification("ชื่อจริงสั้นเกินไป", "error");
       return false;
     }
     return true;
   };
 
-  const handleForceLogout = async () => {
-    await signOut(auth);
-    setShowGoogleKYC(false);
-    setTempGoogleUser(null);
-    setLoading(false);
-    setFormData({
-      email: "", password: "", realName: "", nickname: "", 
-      phone: "", birthDate: "", address: "", lineId: ""
-    });
-    showNotification("ยกเลิกรายการเรียบร้อย", "error");
-  };
-
+  // ... (Auth Functions: handleGoogleLogin, handleEmailLogin, etc.)
   const handleGoogleLogin = async () => {
     setLoading(true);
-    setErrorState(false);
     try {
       const provider = new GoogleAuthProvider();
       const result = await signInWithPopup(auth, provider);
@@ -214,13 +346,13 @@ export default function LoginPage() {
 
       if (docSnap.exists() && docSnap.data().realName) {
         showNotification("ยินดีต้อนรับกลับมาครับ! 🦈", "success");
-        setTimeout(() => router.push("/dashboard"), 1500);
+        setTimeout(() => router.push("/services"), 1500);
       } else {
         setTempGoogleUser(user);
         setFormData(prev => ({ ...prev, email: user.email || "" }));
-        setShowGoogleKYC(true);
+        setMode("google_kyc");
         setLoading(false);
-        showNotification("กรุณากรอกข้อมูลเพิ่มเติม", "success");
+        showNotification("Please complete your profile", "success");
       }
     } catch (error: any) {
       showNotification(error.message, "error");
@@ -233,41 +365,34 @@ export default function LoginPage() {
     setLoading(true);
     try {
       await signInWithEmailAndPassword(auth, formData.email, formData.password);
-      showNotification("เข้าสู่ระบบสำเร็จ! กำลังดำดิ่ง...", "success");
-      setTimeout(() => router.push("/dashboard"), 1500);
+      showNotification("Access Granted. Diving...", "success");
+      setTimeout(() => router.push("/services"), 1500);
     } catch (error: any) {
-      showNotification("อีเมลหรือรหัสผ่านไม่ถูกต้อง", "error");
+      showNotification("Invalid credentials", "error");
       setLoading(false);
     }
   };
 
   const handleEmailRegister = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!validateForm()) return; 
-
+    if (!validateForm()) return;
     setLoading(true);
 
-    const isDuplicate = await checkEmailDuplicate(formData.email);
-    if (isDuplicate) {
-        showNotification("อีเมลนี้มีผู้ใช้งานแล้ว", "error");
+    const q = query(collection(db, "users"), where("email", "==", formData.email));
+    const querySnapshot = await getDocs(q);
+    if (!querySnapshot.empty) {
+        showNotification("Email already in use", "error");
         setLoading(false);
         return;
     }
 
     try {
       const result = await createUserWithEmailAndPassword(auth, formData.email, formData.password);
-      const user = result.user;
-      await saveUserData(user);
-      
-      showNotification("🎉 สมัครสมาชิกสำเร็จ! ยินดีต้อนรับครับ", "success");
-      setTimeout(() => router.push("/dashboard"), 2000);
-
+      await saveUserData(result.user);
+      showNotification("Registration Complete!", "success");
+      setTimeout(() => router.push("/services"), 2000);
     } catch (error: any) {
-      if (error.code === 'auth/email-already-in-use') {
-        showNotification("อีเมลนี้ถูกใช้สมัครไปแล้ว", "error");
-      } else {
-        showNotification(error.message, "error");
-      }
+      showNotification(error.message, "error");
       setLoading(false);
     }
   };
@@ -277,11 +402,10 @@ export default function LoginPage() {
     if (!validateForm()) return;
     if (!tempGoogleUser) return;
     setLoading(true);
-    
     try {
       await saveUserData(tempGoogleUser);
-      showNotification("บันทึกข้อมูลเรียบร้อย! ลุยกันเลย 🦈", "success");
-      setTimeout(() => router.push("/dashboard"), 2000);
+      showNotification("Profile Updated!", "success");
+      setTimeout(() => router.push("/services"), 2000);
     } catch (error: any) {
       showNotification(error.message, "error");
       setLoading(false);
@@ -306,144 +430,223 @@ export default function LoginPage() {
     });
   };
 
+  if (!mounted) return <div className="bg-black h-screen w-screen" />;
+  const isDark = theme === "dark";
+
   return (
-    <MagicBackground>
-      <style jsx global>{`
-        @keyframes shake {
-          0%, 100% { transform: translateX(0); }
-          20% { transform: translateX(-5px); }
-          40% { transform: translateX(5px); }
-          60% { transform: translateX(-5px); }
-          80% { transform: translateX(5px); }
-        }
-        @keyframes shark-bite {
-          0% { transform: translate(-50%, -200%); opacity: 0; }
-          60% { transform: translate(-50%, 10%); opacity: 1; }
-          80% { transform: translate(-50%, -5%); }
-          100% { transform: translate(-50%, 0); }
-        }
-        @keyframes shrink-width {
-          from { width: 100%; }
-          to { width: 0%; }
-        }
-        .animate-shake { animation: shake 0.4s cubic-bezier(.36,.07,.19,.97) both; }
-        .animate-shark-bite { animation: shark-bite 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
-        .animate-shrink-width { animation-timing-function: linear; animation-fill-mode: forwards; }
-      `}</style>
+    <div className={cn(
+      "h-[100dvh] w-screen overflow-hidden relative flex flex-col items-center justify-center p-4 selection:bg-cyan-500/30 transition-colors duration-500",
+      isDark ? "bg-[#020617] text-white" : "bg-slate-50 text-slate-900"
+    )}>
+      
+      {/* 🎮 TOP RIGHT CONTROL BAR (The main request) */}
+      <TopRightControls 
+        scene={scene} 
+        setScene={handleSceneChange}
+        theme={theme}
+        setTheme={handleThemeChange}
+        isLite={isLiteMode}
+        toggleLite={toggleLiteMode}
+        goHome={handleGoHome}
+      />
 
-      {/* 🔔 Notification Toast (ย้ายมา top-28) */}
-      <SeaToast show={toast.show} message={toast.message} type={toast.type} />
-
-      <div className="min-h-screen flex flex-col items-center justify-center p-4">
-        
-        {/* Google KYC Form */}
-        {showGoogleKYC ? (
-          <div className="bg-[#001a2c]/80 backdrop-blur-xl p-8 rounded-[2rem] border border-cyan-500/30 w-full max-w-lg shadow-[0_0_50px_rgba(0,0,0,0.5)] relative z-20">
-             <h2 className="text-xl font-serif font-black text-cyan-400 mb-6 drop-shadow-[0_0_10px_rgba(34,211,238,0.5)]">
-               🌊 Diver Information
-             </h2>
-             <form onSubmit={handleGoogleKYCSubmit} className="space-y-4">
-                <SeaInput label="Email (Google)" type="email" value={formData.email} onChange={()=>{}} readOnly={true} />
-                <div className="grid grid-cols-2 gap-4">
-                  <SeaInput label="ชื่อจริง-นามสกุล" type="text" value={formData.realName} onChange={(e:any) => handleChange('realName', e.target.value)} placeholder="สมชาย ใจดี" required error={errorState} />
-                  <SeaInput label="ชื่อเล่น" type="text" value={formData.nickname} onChange={(e:any) => handleChange('nickname', e.target.value)} placeholder="แจ๊ค" required error={errorState} />
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <SeaInput label="เบอร์โทรศัพท์" type="tel" value={formData.phone} onChange={(e:any) => handleChange('phone', e.target.value)} placeholder="08xxxxxxxx" maxLength={10} required error={errorState} />
-                  <SeaInput label="วันเกิด" type="date" value={formData.birthDate} onChange={(e:any) => handleChange('birthDate', e.target.value)} required error={errorState} />
-                </div>
-                <SeaInput label="LINE ID" type="text" value={formData.lineId} onChange={(e:any) => handleChange('lineId', e.target.value)} error={errorState} />
-                <SeaInput label="ที่อยู่" type="text" value={formData.address} onChange={(e:any) => handleChange('address', e.target.value)} error={errorState} />
-                
-                <div className="pt-4 flex gap-3">
-                  <div className="w-1/3">
-                     <SeaButton type="button" onClick={handleForceLogout} variant="danger">Cancel</SeaButton>
-                  </div>
-                  <div className="w-2/3">
-                     <SeaButton type="submit" loading={loading} error={errorState}>Confirm Dive</SeaButton>
-                  </div>
-                </div>
-             </form>
-          </div>
+      {/* BACKGROUND LOGIC */}
+      <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden">
+        {!isLiteMode ? (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 1 }}>
+              {scene === "underwater" && <UnderwaterBackground intensity={0.8} speed={0.3} />}
+              {scene === "snow" && <SnowBackground count={100} intensity={0.6} speed={0.5} />}
+          </motion.div>
         ) : (
-          /* Main Login Card */
-          <div className="bg-[#001a2c]/80 backdrop-blur-xl rounded-[2.5rem] shadow-[0_0_50px_rgba(8,145,178,0.2)] border border-cyan-500/20 w-full max-w-md overflow-hidden relative z-20">
-            <div className="text-center pt-8 pb-4">
-              <div className="text-6xl mb-2 drop-shadow-[0_0_15px_rgba(34,211,238,0.8)] animate-pulse">🦈</div>
-              <h1 className="text-3xl font-serif font-black text-white tracking-widest drop-shadow-md">CrocByte</h1>
-              <p className="text-[10px] text-cyan-300 uppercase tracking-[0.4em] mt-2 opacity-70">Deep Ocean Access</p>
-            </div>
+          <div className={cn(
+            "absolute inset-0 transition-colors duration-500",
+            isDark 
+              ? scene === "underwater" ? "bg-gradient-to-b from-[#001a2c] to-[#000]" : "bg-gradient-to-b from-[#0f172a] to-[#000]"
+              : "bg-gradient-to-b from-slate-100 to-white"
+          )} />
+        )}
 
-            <div className="flex border-b border-cyan-500/20 mx-8">
-              <button onClick={() => {setActiveTab("google"); setErrorState(false);}}
-                className={`flex-1 py-4 text-xs font-bold uppercase tracking-widest transition-all
-                  ${activeTab === "google" ? "text-cyan-400 border-b-2 border-cyan-400 shadow-[0_10px_20px_-10px_rgba(34,211,238,0.5)]" : "text-gray-500 hover:text-cyan-200"}
-                `}>Google</button>
-              <button onClick={() => {setActiveTab("email"); setErrorState(false);}}
-                className={`flex-1 py-4 text-xs font-bold uppercase tracking-widest transition-all
-                  ${activeTab === "email" ? "text-cyan-400 border-b-2 border-cyan-400 shadow-[0_10px_20px_-10px_rgba(34,211,238,0.5)]" : "text-gray-500 hover:text-cyan-200"}
-                `}>Email</button>
-            </div>
-
-            <div className="p-8">
-              {activeTab === "google" && (
-                <div className="space-y-6 text-center py-4">
-                  <p className="text-xs text-cyan-200/60 uppercase tracking-widest mb-4">Quick Access</p>
-                  <button onClick={handleGoogleLogin} disabled={loading}
-                    className={`w-full bg-white text-black py-4 rounded-2xl font-bold shadow-lg flex items-center justify-center gap-4 hover:scale-[1.02] active:scale-95 transition-all
-                      ${errorState ? 'animate-shake border-2 border-red-500' : ''}
-                    `}>
-                    <img src="https://authjs.dev/img/providers/google.svg" className="w-5 h-5" />
-                    Sign in with Google
-                  </button>
-                </div>
-              )}
-
-              {activeTab === "email" && (
-                <div>
-                  {emailMode === "login" ? (
-                    <form onSubmit={handleEmailLogin} className="space-y-5">
-                      <SeaInput label="Email" type="email" value={formData.email} onChange={(e:any) => handleChange('email', e.target.value)} placeholder="captain@sea.com" required error={errorState} />
-                      <SeaInput label="Password" type="password" value={formData.password} onChange={(e:any) => handleChange('password', e.target.value)} placeholder="••••••" required error={errorState} />
-                      <div className="pt-2">
-                         <SeaButton type="submit" loading={loading} error={errorState}>DIVE IN</SeaButton>
-                      </div>
-                      <div className="text-center mt-4">
-                        <span className="text-xs text-cyan-200/50">New diver? </span>
-                        <button type="button" onClick={() => setEmailMode("register")} className="text-xs font-bold text-cyan-400 hover:text-cyan-200 hover:underline">Register</button>
-                      </div>
-                    </form>
-                  ) : (
-                    <form onSubmit={handleEmailRegister} className="space-y-3">
-                      <div className="p-3 rounded-xl bg-black/20 border border-cyan-500/20 space-y-3">
-                         <SeaInput label="Email" type="email" value={formData.email} onChange={(e:any) => handleChange('email', e.target.value)} required error={errorState} />
-                         <SeaInput label="Password" type="password" value={formData.password} onChange={(e:any) => handleChange('password', e.target.value)} required error={errorState} />
-                      </div>
-                      <div className="grid grid-cols-2 gap-3">
-                        <SeaInput label="ชื่อจริง" type="text" value={formData.realName} onChange={(e:any) => handleChange('realName', e.target.value)} required error={errorState} />
-                        <SeaInput label="ชื่อเล่น" type="text" value={formData.nickname} onChange={(e:any) => handleChange('nickname', e.target.value)} required error={errorState} />
-                      </div>
-                      <div className="grid grid-cols-2 gap-3">
-                        <SeaInput label="เบอร์โทร" type="tel" value={formData.phone} onChange={(e:any) => handleChange('phone', e.target.value)} maxLength={10} required error={errorState} />
-                        <SeaInput label="วันเกิด" type="date" value={formData.birthDate} onChange={(e:any) => handleChange('birthDate', e.target.value)} required error={errorState} />
-                      </div>
-                      <SeaInput label="ที่อยู่" type="text" value={formData.address} onChange={(e:any) => handleChange('address', e.target.value)} error={errorState} />
-                      <div className="pt-2 flex gap-3">
-                         <div className="w-1/3">
-                           <SeaButton type="button" onClick={() => setEmailMode("login")} variant="danger">Back</SeaButton>
-                         </div>
-                         <div className="w-2/3">
-                           <SeaButton type="submit" loading={loading} error={errorState}>REGISTER DIVE</SeaButton>
-                         </div>
-                      </div>
-                    </form>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0%,rgba(0,0,0,0.6)_100%)] z-1" />
+        
+        {!isLiteMode && isDark && (
+           <div className="absolute inset-0 opacity-[0.03] pointer-events-none z-1 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] mix-blend-overlay" />
         )}
       </div>
-    </MagicBackground>
+
+      <MotionToast isVisible={toast.show} message={toast.message} type={toast.type} onClose={() => setToast(prev => ({ ...prev, show: false }))} />
+
+      {/* LAYER 1: MAIN CARD */}
+      <motion.div 
+        layout
+        initial={{ scale: 0.9, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        transition={{ type: "spring", duration: 0.8 }}
+        className={cn(
+          "relative z-20 w-full max-w-md overflow-hidden backdrop-blur-xl border shadow-2xl transition-all duration-500",
+          isDark 
+            ? "bg-[#001a2c]/70 border-white/10 shadow-cyan-900/20 rounded-[2rem]" 
+            : "bg-white/70 border-white/40 shadow-slate-300 rounded-[2rem]"
+        )}
+      >
+        <div className="text-center pt-8 pb-2">
+           <motion.div 
+             animate={{ y: isLiteMode ? 0 : [0, -10, 0] }}
+             transition={{ repeat: Infinity, duration: 4, ease: "easeInOut" }}
+             className="text-6xl mb-2 drop-shadow-lg inline-block"
+           >
+             🦈
+           </motion.div>
+           <h1 className="text-3xl font-serif font-black tracking-widest uppercase">
+             CROCWORK
+           </h1>
+           <p className={cn("text-[10px] uppercase tracking-[0.4em] mt-1 opacity-60", isDark ? "text-cyan-400" : "text-slate-500")}>
+             ระบบล็อคอิน
+           </p>
+        </div>
+
+        <div className="p-8 pt-4 min-h-[400px]">
+          <AnimatePresence mode="wait">
+            
+            {/* 1. INITIAL SELECTION */}
+            {mode === "initial" && (
+              <motion.div 
+                key="initial"
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 20 }}
+                className="space-y-4 pt-4"
+              >
+                <button 
+                  onClick={handleGoogleLogin}
+                  className={cn(
+                    "w-full py-4 rounded-xl font-bold flex items-center justify-center gap-3 transition-all transform active:scale-95 border",
+                    isDark ? "bg-white text-black hover:bg-gray-100 border-transparent" : "bg-black text-white hover:bg-gray-800"
+                  )}
+                >
+                  <img src="https://authjs.dev/img/providers/google.svg" className="w-5 h-5" alt="Google" />
+                  Sign in with Google
+                </button>
+
+                <div className="relative py-2">
+                  <div className="absolute inset-0 flex items-center"><span className="w-full border-t border-white/10"></span></div>
+                  <div className="relative flex justify-center text-xs uppercase"><span className={cn("px-2 opacity-50", isDark ? "bg-[#001a2c] text-white" : "bg-white text-black")}>Or continue with</span></div>
+                </div>
+
+                <CrocButton onClick={() => setMode("email_login")} variant="primary">
+                  Email Login
+                </CrocButton>
+                
+                <div className="text-center pt-2">
+                  <button onClick={() => setMode("email_register")} className="text-xs text-cyan-400 hover:underline opacity-80">
+                    Register New Account
+                  </button>
+                </div>
+              </motion.div>
+            )}
+
+            {/* 2. EMAIL LOGIN */}
+            {mode === "email_login" && (
+              <motion.form 
+                key="login"
+                onSubmit={handleEmailLogin}
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                className="space-y-5"
+              >
+                <div className="text-center text-xs opacity-50 uppercase tracking-widest mb-4">Diver Login</div>
+                <CrocInput label="Email" type="email" value={formData.email} onChange={(e:any) => handleChange('email', e.target.value)} placeholder="captain@sea.com" required error={errorState} />
+                <CrocInput label="Password" type="password" value={formData.password} onChange={(e:any) => handleChange('password', e.target.value)} placeholder="••••••" required error={errorState} />
+                
+                <div className="pt-4 space-y-3">
+                   <CrocButton type="submit" loading={loading} error={errorState}>Dive In</CrocButton>
+                   <button type="button" onClick={() => setMode("initial")} className="w-full text-[10px] uppercase tracking-widest opacity-50 hover:opacity-100 py-2">Back to Options</button>
+                </div>
+              </motion.form>
+            )}
+
+            {/* 3. REGISTER */}
+            {mode === "email_register" && (
+              <motion.form 
+                key="register"
+                onSubmit={handleEmailRegister}
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                className="space-y-3"
+              >
+                 <div className="text-center text-xs opacity-50 uppercase tracking-widest mb-2">New Recruitment</div>
+                 <div className="grid grid-cols-2 gap-3">
+                   <CrocInput label="Email" type="email" value={formData.email} onChange={(e:any) => handleChange('email', e.target.value)} required error={errorState} />
+                   <CrocInput label="Password" type="password" value={formData.password} onChange={(e:any) => handleChange('password', e.target.value)} required error={errorState} />
+                 </div>
+                 <div className="grid grid-cols-2 gap-3">
+                   <CrocInput label="ชื่อจริง" type="text" value={formData.realName} onChange={(e:any) => handleChange('realName', e.target.value)} required error={errorState} />
+                   <CrocInput label="ชื่อเล่น" type="text" value={formData.nickname} onChange={(e:any) => handleChange('nickname', e.target.value)} required error={errorState} />
+                 </div>
+                 <div className="grid grid-cols-2 gap-3">
+                   <CrocInput label="เบอร์โทร" type="tel" value={formData.phone} onChange={(e:any) => handleChange('phone', e.target.value)} maxLength={10} required error={errorState} />
+                   <CrocInput label="วันเกิด" type="date" value={formData.birthDate} onChange={(e:any) => handleChange('birthDate', e.target.value)} required error={errorState} />
+                 </div>
+                 <div className="pt-2 flex gap-3">
+                    <div className="w-1/3">
+                      <CrocButton type="button" onClick={() => setMode("initial")} variant="danger">Back</CrocButton>
+                    </div>
+                    <div className="w-2/3">
+                      <CrocButton type="submit" loading={loading} error={errorState}>Join</CrocButton>
+                    </div>
+                 </div>
+              </motion.form>
+            )}
+
+            {/* 4. GOOGLE KYC */}
+            {mode === "google_kyc" && (
+               <motion.form 
+                key="kyc"
+                onSubmit={handleGoogleKYCSubmit}
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 1.05 }}
+                className="space-y-3"
+               >
+                 <div className="text-center text-xs text-cyan-400 font-bold uppercase tracking-widest mb-4">Complete Your Profile</div>
+                 <CrocInput label="Email (Google)" type="email" value={formData.email} onChange={()=>{}} readOnly={true} />
+                 <div className="grid grid-cols-2 gap-3">
+                   <CrocInput label="ชื่อจริง" type="text" value={formData.realName} onChange={(e:any) => handleChange('realName', e.target.value)} required error={errorState} />
+                   <CrocInput label="ชื่อเล่น" type="text" value={formData.nickname} onChange={(e:any) => handleChange('nickname', e.target.value)} required error={errorState} />
+                 </div>
+                 <div className="grid grid-cols-2 gap-3">
+                    <CrocInput label="เบอร์โทร" type="tel" value={formData.phone} onChange={(e:any) => handleChange('phone', e.target.value)} maxLength={10} required error={errorState} />
+                    <CrocInput label="วันเกิด" type="date" value={formData.birthDate} onChange={(e:any) => handleChange('birthDate', e.target.value)} required error={errorState} />
+                 </div>
+                 <CrocInput label="LINE ID" type="text" value={formData.lineId} onChange={(e:any) => handleChange('lineId', e.target.value)} />
+                 <div className="pt-2 flex gap-3">
+                    <div className="w-1/3">
+                      <CrocButton type="button" onClick={async () => {
+                         await signOut(auth);
+                         setMode("initial");
+                         setTempGoogleUser(null);
+                      }} variant="danger">Cancel</CrocButton>
+                    </div>
+                    <div className="w-2/3">
+                      <CrocButton type="submit" loading={loading} error={errorState}>Confirm</CrocButton>
+                    </div>
+                 </div>
+               </motion.form>
+            )}
+          </AnimatePresence>
+        </div>
+      </motion.div>
+
+      <motion.div 
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.5 }}
+        className="absolute bottom-4 text-[9px] font-mono opacity-30 tracking-[0.2em]"
+      >
+        UPLINK SECURED
+      </motion.div>
+
+    </div>
   );
 }

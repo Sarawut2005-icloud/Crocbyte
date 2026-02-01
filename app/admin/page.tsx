@@ -1,14 +1,46 @@
 "use client";
-import { useState, useEffect, useRef } from "react";
+
+/**
+ * 🛡️ CROCWORK ADMIN (V9.2 - Final Fix)
+ * - [FIXED] Restored Theme Switcher Controller (Bottom-Left).
+ * - [FIXED] Edit Log Text Color: Black in Light Mode / White in Dark Mode.
+ * - [CORE] All Analytics (4 Graphs), CSV, Manual Reviews, System Log included.
+ */
+
+import { useState, useEffect, useRef, useMemo } from "react";
 import { db, auth } from "../../lib/firebase";
 import { useRouter } from "next/navigation";
-import { onAuthStateChanged } from "firebase/auth";
+import Image from "next/image";
+import { onAuthStateChanged, signOut } from "firebase/auth";
 import { 
-  collection, addDoc, serverTimestamp, query, where, getDocs, updateDoc, doc, deleteDoc, onSnapshot, orderBy, limit, Timestamp
+  collection, addDoc, serverTimestamp, query, orderBy, limit, onSnapshot, 
+  doc, updateDoc, deleteDoc, getDocs, where, getDoc, Timestamp, setDoc
 } from "firebase/firestore";
-import MagicBackground from "../../components/MagicBackground";
+import { motion, AnimatePresence } from "framer-motion";
+import { 
+  FaUser, FaMoneyBillWave, FaEdit, FaTrash, FaSearch, FaEye, 
+  FaSignOutAlt, FaTimes, FaCamera, FaBriefcase, FaPlus, FaSave, FaCheckCircle, 
+  FaAddressCard, FaPhone, FaLine, FaFacebook, FaStar, FaEnvelope, FaImages,
+  FaChartPie, FaFilter, FaSortAmountDown, FaSortAmountUp, FaLayerGroup,
+  FaChevronLeft, FaChevronRight, FaFileCsv, FaChartLine, FaChartBar, FaBullhorn, FaCrown
+} from "react-icons/fa";
+
+// --- IMPORTS FROM LANDING PAGE ---
+import { SnowBackground } from "@/components/SnowBackground";
+import { UnderwaterBackground } from "@/components/UnderwaterBackground";
+
+const cn = (...classes: (string | undefined | null | boolean)[]) => classes.filter(Boolean).join(" ");
 
 const ADMIN_EMAIL = "skizzkat@gmail.com"; 
+
+// --- CONTACT INFO ---
+const MY_CONTACT = {
+    name: "Sarawut Phusee",
+    facebook: "https://www.facebook.com/sarawut.phusee",
+    line: "sxrx_wut18",
+    email: "skizzkat@gmail.com",
+    avatar: "/croc-mascot.jpg"
+};
 
 const VIP_TIERS = [
   { level: 10, min: 200000 }, { level: 9, min: 150000 }, { level: 8, min: 125000 },
@@ -17,501 +49,519 @@ const VIP_TIERS = [
   { level: 1, min: 1000 }, { level: 0, min: 0 },
 ];
 
+const INITIAL_PACKAGE = { name: "", price: 0, days: 3, revisions: 3, desc: "", features: "" };
+const INITIAL_SERVICE_FORM = {
+  title: "", category: "", images: [] as string[], description: "", rating: 0, reviewsCount: 0, reviews: [] as any[],
+  packages: {
+    basic: { ...INITIAL_PACKAGE, name: "Basic" },
+    standard: { ...INITIAL_PACKAGE, name: "Standard" },
+    premium: { ...INITIAL_PACKAGE, name: "Premium" }
+  }
+};
+
 export default function AdminPage() {
   const router = useRouter();
+  
+  // -- SYSTEM --
+  const [mounted, setMounted] = useState(false);
+  const [time, setTime] = useState<Date | null>(null);
+  const [scene, setScene] = useState<"underwater" | "snow">("underwater");
+  const [theme, setTheme] = useState<"dark" | "light">("dark");
+  const [isLiteMode, setIsLiteMode] = useState(false);
+
+  // -- ADMIN --
   const [isAuthorized, setIsAuthorized] = useState(false);
+  const [activeTab, setActiveTab] = useState<'analytics' | 'users' | 'transactions' | 'services'>('analytics');
+  const [loading, setLoading] = useState(false);
+  
+  // -- DATA --
   const [users, setUsers] = useState<any[]>([]);
-  const [filteredUsers, setFilteredUsers] = useState<any[]>([]);
+  const [transactions, setTransactions] = useState<any[]>([]);
+  const [services, setServices] = useState<any[]>([]);
+  
+  // -- SYSTEM LOG EDITOR --
+  const [showLogEditor, setShowLogEditor] = useState(false);
+  const [updateLogText, setUpdateLogText] = useState("");
+
+  // -- PAGINATION --
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
+
+  // -- FILTER --
   const [searchQuery, setSearchQuery] = useState("");
-  
-  // Modal States
+  const [filterCategory, setFilterCategory] = useState("all");
+  const [minPrice, setMinPrice] = useState("");
+  const [maxPrice, setMaxPrice] = useState("");
+  const [sortBy, setSortBy] = useState("newest");
+
+  // -- MODALS --
+  const [showUserModal, setShowUserModal] = useState(false);
   const [selectedUser, setSelectedUser] = useState<any>(null);
-  const [showModal, setShowModal] = useState(false);
-  
-  // 🆕 Edit Transaction State
+  const [showServiceModal, setShowServiceModal] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<any>(null);
-  const [editTransNote, setEditTransNote] = useState("");
-  const [editTransSlip, setEditTransSlip] = useState<string | null>(null);
-  const [editTransWork, setEditTransWork] = useState<string | null>(null);
-  
-  // CRUD State (User/New Trans)
+
+  // -- FORMS --
   const [isEditMode, setIsEditMode] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
-
-  // Form State
   const [formName, setFormName] = useState("");
-  const [formEmail, setFormEmail] = useState(""); 
+  const [formEmail, setFormEmail] = useState("");
   const [formAmount, setFormAmount] = useState("");
   const [formNote, setFormNote] = useState("");
-  const [formDate, setFormDate] = useState(""); 
-  const [loading, setLoading] = useState(false);
-
-  // 📷 Images State (New Trans)
+  const [formRealName, setFormRealName] = useState("");
+  const [formPhone, setFormPhone] = useState("");
+  const [formLine, setFormLine] = useState("");
+  const [formAddress, setFormAddress] = useState("");
   const [slipPreview, setSlipPreview] = useState<string | null>(null);
   const [workPreview, setWorkPreview] = useState<string | null>(null);
   
+  const [editTransNote, setEditTransNote] = useState("");
+  const [editTransSlip, setEditTransSlip] = useState<string | null>(null);
+  const [editTransWork, setEditTransWork] = useState<string | null>(null);
+
+  const [serviceForm, setServiceForm] = useState<any>(INITIAL_SERVICE_FORM);
+  const [editingServiceId, setEditingServiceId] = useState<string | null>(null);
+  const [activePackageTab, setActivePackageTab] = useState<'basic' | 'standard' | 'premium'>('basic');
+  const [newReview, setNewReview] = useState({ user: "", comment: "", star: 5, image: null as string | null });
+
   // Refs
   const slipInputRef = useRef<HTMLInputElement>(null);
   const workInputRef = useRef<HTMLInputElement>(null);
   const editTransSlipRef = useRef<HTMLInputElement>(null);
   const editTransWorkRef = useRef<HTMLInputElement>(null);
+  const serviceImageInputRef = useRef<HTMLInputElement>(null);
+  const reviewImageInputRef = useRef<HTMLInputElement>(null);
 
-  // Security & Fetch Data
+  // --- INIT ---
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
+    setMounted(true);
+    const s = localStorage.getItem("croc_scene");
+    const t = localStorage.getItem("croc_theme");
+    const l = localStorage.getItem("croc_lite");
+    if (s) setScene(s as any);
+    if (t) setTheme(t as any);
+    if (l) setIsLiteMode(l === "true");
+
+    const timer = setInterval(() => setTime(new Date()), 1000);
+    const unsub = onAuthStateChanged(auth, (user) => {
       if (!user) router.push("/login");
       else if (user.email !== ADMIN_EMAIL) { alert("⛔ Access Denied"); router.push("/dashboard"); }
       else setIsAuthorized(true);
     });
-    return () => unsubscribe();
+    return () => { clearInterval(timer); unsub(); };
   }, [router]);
 
   useEffect(() => {
+    if (mounted) {
+        localStorage.setItem("croc_scene", scene);
+        localStorage.setItem("croc_theme", theme);
+        localStorage.setItem("croc_lite", String(isLiteMode));
+    }
+  }, [scene, theme, isLiteMode, mounted]);
+
+  // --- DATA SYNC ---
+  useEffect(() => {
     if (!isAuthorized) return;
-    const qUsers = query(collection(db, "users"), orderBy("lastUpdated", "desc"));
-    const unsubUsers = onSnapshot(qUsers, (snap) => {
-      const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setUsers(data); setFilteredUsers(data);
-    });
-    return () => unsubUsers();
+    const unsub1 = onSnapshot(query(collection(db, "users"), orderBy("lastUpdated", "desc")), s => setUsers(s.docs.map(d => ({id:d.id, ...d.data()}))));
+    const unsub2 = onSnapshot(query(collection(db, "transactions"), orderBy("timestamp", "desc")), s => setTransactions(s.docs.map(d => ({id:d.id, ...d.data()}))));
+    const unsub3 = onSnapshot(collection(db, "services"), s => setServices(s.docs.map(d => ({id:d.id, ...d.data()}))));
+    const unsubLog = onSnapshot(doc(db, "system", "info"), (doc) => { if (doc.exists()) { setUpdateLogText(doc.data().text || ""); } });
+    return () => { unsub1(); unsub2(); unsub3(); unsubLog(); };
   }, [isAuthorized]);
 
-  useEffect(() => {
-    if (!searchQuery) setFilteredUsers(users);
-    else {
-      const lowerQ = searchQuery.toLowerCase();
-      setFilteredUsers(users.filter(u => 
-        (u.name && u.name.toLowerCase().includes(lowerQ)) || 
-        (u.realName && u.realName.toLowerCase().includes(lowerQ)) ||
-        (u.nickname && u.nickname.toLowerCase().includes(lowerQ)) ||
-        (u.phone && u.phone.includes(lowerQ)) ||
-        (u.email && u.email.toLowerCase().includes(lowerQ))
-      ));
-    }
-  }, [searchQuery, users]);
-
-  const calculateVIP = (total: number) => VIP_TIERS.find(t => total >= t.min)?.level || 0;
-  const totalRevenue = users.reduce((acc, curr) => acc + (curr.totalSpent || 0), 0);
-
-  // --- FILE HANDLER ---
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, setPreview: Function) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      if (file.size > 5 * 1024 * 1024) { 
-         alert("File too large (Max 5MB)"); return; 
-      }
-      const reader = new FileReader();
-      reader.onloadend = () => setPreview(reader.result as string);
-      reader.readAsDataURL(file);
-    }
-  };
-
-  // --- CRUD LOGIC (User/New Trans) ---
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault(); setLoading(true);
-    const amountVal = Number(formAmount);
-    const timestamp = formDate ? Timestamp.fromDate(new Date(formDate)) : serverTimestamp();
-
-    try {
-      if (isEditMode && editId) {
-        const newVIP = calculateVIP(amountVal);
-        await updateDoc(doc(db, "users", editId), {
-          name: formName, email: formEmail, totalSpent: amountVal, vipLevel: newVIP, lastUpdated: serverTimestamp()
-        });
-        alert(`✅ Updated Customer: ${formName}`);
-        cancelEdit();
-      } else {
-        let userId = ""; let newTotal = 0; let newVIP = 0;
-        const q = query(collection(db, "users"), where("email", "==", formEmail));
-        const snap = await getDocs(q);
-
-        if (!snap.empty) {
-          const userDoc = snap.docs[0]; userId = userDoc.id; const oldData = userDoc.data();
-          newTotal = (oldData.totalSpent || 0) + amountVal; newVIP = calculateVIP(newTotal);
-          await updateDoc(doc(db, "users", userId), { 
-              totalSpent: newTotal, vipLevel: newVIP, lastUpdated: serverTimestamp() 
-          });
-        } else {
-          newTotal = amountVal; newVIP = calculateVIP(newTotal);
-          const newUserRef = await addDoc(collection(db, "users"), { 
-              name: formName, realName: formName, email: formEmail, totalSpent: newTotal, vipLevel: newVIP, joinedAt: serverTimestamp(), lastUpdated: serverTimestamp() 
-          });
-          userId = newUserRef.id;
-        }
-
-        await addDoc(collection(db, "transactions"), { 
-            userId: userId, userName: formName, amount: amountVal, note: formNote || "เติมเงิน", 
-            timestamp: timestamp, adminEmail: auth.currentUser?.email,
-            paymentSlip: slipPreview,
-            workImage: workPreview
-        });
-        
-        alert(`✅ Transaction & Images Saved`);
-        resetForm();
-      }
-    } catch (err) { alert("Error: " + err); }
-    setLoading(false);
-  };
-
-  const handleDelete = async (id: string, name: string) => {
-    if(confirm(`⚠️ Are you sure you want to DELETE user: ${name}?\nThis cannot be undone.`)) {
-      try { await deleteDoc(doc(db, "users", id)); } catch(e) { alert("Error deleting: " + e); }
-    }
-  }
-
-  const startEdit = (user: any) => {
-    setIsEditMode(true); setEditId(user.id); setFormName(user.name); setFormEmail(user.email || "");
-    setFormAmount(user.totalSpent); setFormNote("Manual Update via Admin"); 
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  const cancelEdit = () => { setIsEditMode(false); setEditId(null); resetForm(); };
-  const resetForm = () => { 
-    setFormName(""); setFormEmail(""); setFormAmount(""); setFormNote(""); setFormDate(""); 
-    setSlipPreview(null); setWorkPreview(null); 
-  };
-
-  const openUserDetail = async (user: any) => {
-    setSelectedUser(user);
-    const q = query(collection(db, "transactions"), where("userId", "==", user.id), orderBy("timestamp", "desc"));
-    const snap = await getDocs(q);
-    const history = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    setSelectedUser({ ...user, history }); setShowModal(true);
-  };
-
-  // ✅ New Function: Open Edit Transaction Modal
-  const openEditTransaction = (trans: any) => {
-    setEditingTransaction(trans);
-    setEditTransNote(trans.note || "");
-    setEditTransSlip(trans.paymentSlip || null);
-    setEditTransWork(trans.workImage || null);
-  };
-
-  // ✅ New Function: Save Transaction Update
-  const handleUpdateTransaction = async () => {
-    if (!editingTransaction) return;
-    setLoading(true);
-    try {
-      await updateDoc(doc(db, "transactions", editingTransaction.id), {
-        note: editTransNote,
-        paymentSlip: editTransSlip,
-        workImage: editTransWork
+  // --- FILTER & ANALYTICS ---
+  const availableCategories = useMemo(() => ["all", ...Array.from(new Set(services.map(s => s.category).filter(Boolean)))], [services]);
+  const filteredServices = useMemo(() => {
+      return services.filter(s => {
+          const matchSearch = s.title.toLowerCase().includes(searchQuery.toLowerCase()) || s.description?.toLowerCase().includes(searchQuery.toLowerCase());
+          const matchCat = filterCategory === "all" || s.category === filterCategory;
+          const price = s.packages?.basic?.price || 0;
+          const matchMin = minPrice ? price >= Number(minPrice) : true;
+          const matchMax = maxPrice ? price <= Number(maxPrice) : true;
+          return matchSearch && matchCat && matchMin && matchMax;
+      }).sort((a, b) => {
+          if (sortBy === "priceAsc") return (a.packages?.basic?.price || 0) - (b.packages?.basic?.price || 0);
+          if (sortBy === "priceDesc") return (b.packages?.basic?.price || 0) - (a.packages?.basic?.price || 0);
+          if (sortBy === "rating") return (b.rating || 0) - (a.rating || 0);
+          return 0; 
       });
+  }, [services, searchQuery, filterCategory, minPrice, maxPrice, sortBy]);
+
+  const filteredUsers = users.filter(u => u.name?.toLowerCase().includes(searchQuery.toLowerCase()) || u.email?.toLowerCase().includes(searchQuery.toLowerCase()));
+  const filteredTrans = useMemo(() => transactions.filter(t => t.userName?.toLowerCase().includes(searchQuery.toLowerCase()) || t.note?.toLowerCase().includes(searchQuery.toLowerCase())), [transactions, searchQuery]);
+
+  const indexOfLastItem = currentPage * itemsPerPage;
+  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+  const currentTrans = filteredTrans.slice(indexOfFirstItem, indexOfLastItem);
+  const totalPages = Math.ceil(filteredTrans.length / itemsPerPage);
+  const paginate = (pageNumber: number) => setCurrentPage(pageNumber);
+
+  // --- 📊 ANALYTICS CALCULATIONS ---
+  const stats = useMemo(() => {
+      const totalRevenue = transactions.reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
+      const totalHires = transactions.length; 
+      const avgServicePrice = services.reduce((acc, s) => acc + (s.packages?.basic?.price || 0), 0) / (services.length || 1);
       
-      // Update local state (refresh list in modal)
-      const updatedHistory = selectedUser.history.map((h: any) => 
-        h.id === editingTransaction.id 
-          ? { ...h, note: editTransNote, paymentSlip: editTransSlip, workImage: editTransWork } 
-          : h
-      );
-      setSelectedUser({ ...selectedUser, history: updatedHistory });
+      const categoryBreakdown = services.reduce((acc:any, s) => { acc[s.category] = (acc[s.category] || 0) + 1; return acc; }, {});
+      const categoryData = Object.entries(categoryBreakdown).map(([name, value]:any) => ({ name, value }));
+
+      const dailyRevenue = transactions.reduce((acc:any, t) => {
+          const date = t.timestamp?.toDate().toLocaleDateString('en-GB') || "Unknown";
+          acc[date] = (acc[date] || 0) + Number(t.amount); return acc;
+      }, {});
+      const chartData = Object.keys(dailyRevenue).sort((a,b) => new Date(a.split('/').reverse().join('-')).getTime() - new Date(b.split('/').reverse().join('-')).getTime()).slice(-10).map(date => ({ date, value: dailyRevenue[date] }));
       
-      alert("✅ Transaction Updated!");
-      setEditingTransaction(null); // Close Edit Modal
-    } catch (error: any) {
-      alert("Error updating: " + error.message);
-    }
-    setLoading(false);
+      const topServices = [...services].sort((a,b) => (b.reviewsCount||0) - (a.reviewsCount||0)).slice(0, 5).map(s => ({ name: s.title.substring(0, 15)+'...', value: s.reviewsCount || 0 }));
+
+      // VIP Distribution
+      const vipDist = users.reduce((acc:any, u) => {
+          const level = u.vipLevel || 0;
+          acc[level] = (acc[level] || 0) + 1;
+          return acc;
+      }, {});
+      const vipChartData = Object.keys(vipDist).map(level => ({ name: `VIP ${level}`, value: vipDist[level] }));
+
+      return { totalRevenue, totalHires, avgServicePrice, categoryData, chartData, topServices, vipChartData };
+  }, [transactions, services, users]);
+
+  // --- ACTIONS ---
+  const handleSaveLog = async () => {
+      setLoading(true);
+      try {
+          await setDoc(doc(db, "system", "info"), { text: updateLogText, updatedAt: serverTimestamp() }, { merge: true });
+          alert("✅ Update Log Saved!");
+          setShowLogEditor(false);
+      } catch (e: any) { alert(e.message); }
+      setLoading(false);
   };
 
-  const InfoRow = ({ label, value, copy = false }: any) => (
-    <div className="flex flex-col pb-3 border-b border-[#d4af37]/10 last:border-0 last:pb-0">
-      <span className="text-[10px] uppercase opacity-50 text-[#d4af37] tracking-widest">{label}</span>
-      <div className="flex items-center justify-between">
-         <span className="font-medium text-gray-800 dark:text-[#e5e5e5] text-sm break-all">{value || "-"}</span>
-         {copy && value && (
-           <button onClick={() => navigator.clipboard.writeText(value)} className="text-[10px] opacity-30 hover:opacity-100 hover:text-[#d4af37]">COPY</button>
-         )}
-      </div>
-    </div>
-  );
+  const handleExportCSV = (data: any[], filename: string) => {
+      if (!data.length) return alert("No data to export");
+      const headers = Object.keys(data[0]).join(",");
+      const rows = data.map(obj => Object.values(obj).map(v => typeof v === 'object' ? JSON.stringify(v).replace(/,/g, ';') : `"${String(v).replace(/"/g, '""')}"`).join(","));
+      const csvContent = "data:text/csv;charset=utf-8," + [headers, ...rows].join("\n");
+      const link = document.createElement("a"); link.href = encodeURI(csvContent); link.download = `${filename}.csv`; link.click();
+  };
 
-  if (!isAuthorized) return <MagicBackground><div className="flex h-screen justify-center items-center text-[#d4af37] animate-pulse">🔒 Security Check...</div></MagicBackground>;
+  const handleFileChange = (e: any, setPreview: any) => { const file = e.target.files[0]; if(file){ const reader = new FileReader(); reader.onloadend=()=>setPreview(reader.result); reader.readAsDataURL(file); } };
+  const handleServiceImageUpload = (e: any) => { Array.from(e.target.files).forEach((f:any) => { const r = new FileReader(); r.onloadend=()=>setServiceForm((p:any)=>({...p, images:[...p.images, r.result]})); r.readAsDataURL(f); }); };
+  const removeServiceImage = (i: number) => setServiceForm((p:any) => ({...p, images:p.images.filter((_:any,x:number)=>x!==i)}));
+  const handleReviewImageUpload = (e: any) => { const file = e.target.files[0]; if(file){ const reader = new FileReader(); reader.onloadend=()=>setNewReview({...newReview, image: reader.result as string}); reader.readAsDataURL(file); } };
+  const handleAddReview = () => { if(!newReview.user || !newReview.comment) return alert("Fill fields"); const newR = [...(serviceForm.reviews||[]), {...newReview, date: new Date().toISOString()}]; const avg = (newR.reduce((a:any,b:any)=>a+Number(b.star),0)/newR.length).toFixed(1); setServiceForm({...serviceForm, reviews:newR, rating:avg, reviewsCount:newR.length}); setNewReview({user:"",comment:"",star:5, image: null}); };
+  const removeReview = (i:number) => { const newR = serviceForm.reviews.filter((_:any,x:number)=>x!==i); const avg = newR.length>0?(newR.reduce((a:any,b:any)=>a+Number(b.star),0)/newR.length).toFixed(1):0; setServiceForm({...serviceForm, reviews:newR, rating:avg, reviewsCount:newR.length}); };
+  const handleSaveService = async (e:any) => { e.preventDefault(); setLoading(true); try { const processF = (f:any) => Array.isArray(f)?f:f.split(',').map((s:string)=>s.trim()).filter((s:string)=>s!==""); const data = { ...serviceForm, seller: {...MY_CONTACT, responseTime:"1 ชม."}, startingPrice:Number(serviceForm.packages.basic.price), packages: { basic:{...serviceForm.packages.basic, features:processF(serviceForm.packages.basic.features)}, standard:{...serviceForm.packages.standard, features:processF(serviceForm.packages.standard.features)}, premium:{...serviceForm.packages.premium, features:processF(serviceForm.packages.premium.features)} }, updatedAt:serverTimestamp() }; if(editingServiceId) await updateDoc(doc(db,"services",editingServiceId), data); else await addDoc(collection(db,"services"), {...data, createdAt:serverTimestamp()}); setShowServiceModal(false); setServiceForm(INITIAL_SERVICE_FORM); setEditingServiceId(null); } catch(e:any){ alert(e.message); } setLoading(false); };
+  const handleEditService = (s:any) => { setServiceForm({...s, images:s.images||(s.thumbnail?[s.thumbnail]:[]), reviews:s.reviews||[], packages:{ basic:{...s.packages.basic, features:Array.isArray(s.packages.basic.features)?s.packages.basic.features.join(', '):s.packages.basic.features}, standard:{...s.packages.standard, features:Array.isArray(s.packages.standard.features)?s.packages.standard.features.join(', '):s.packages.standard.features}, premium:{...s.packages.premium, features:Array.isArray(s.packages.premium.features)?s.packages.premium.features.join(', '):s.packages.premium.features} }}); setEditingServiceId(s.id); setShowServiceModal(true); };
+  const handleDeleteService = async (id:string) => { if(confirm("Delete?")) await deleteDoc(doc(db,"services",id)); };
+  const handleSaveUserOrTrans = async (e:any) => { e.preventDefault(); setLoading(true); const amt = Number(formAmount); try { if(isEditMode && editId) { await updateDoc(doc(db,"users",editId), { name:formName, email:formEmail, realName:formRealName, phone:formPhone, lineId:formLine, address:formAddress, totalSpent:amt, vipLevel:calculateVIP(amt) }); alert("User Updated"); cancelEdit(); } else { let uid = ""; const q = query(collection(db,"users"), where("email","==",formEmail)); const s = await getDocs(q); if(!s.empty) { uid = s.docs[0].id; const newT = (s.docs[0].data().totalSpent||0)+amt; await updateDoc(doc(db,"users",uid), { totalSpent:newT, vipLevel:calculateVIP(newT) }); } else { const r = await addDoc(collection(db,"users"), { name:formName, email:formEmail, totalSpent:amt, vipLevel:calculateVIP(amt) }); uid=r.id; } await addDoc(collection(db,"transactions"), { userId:uid, userName:formName, amount:amt, note:formNote, timestamp:serverTimestamp(), paymentSlip:slipPreview, workImage:workPreview }); alert("Saved"); resetForm(); } } catch(e:any){ alert(e.message); } setLoading(false); };
+  const handleUpdateTransaction = async () => { if(!editingTransaction)return; setLoading(true); await updateDoc(doc(db,"transactions",editingTransaction.id), { note:editTransNote, paymentSlip:editTransSlip, workImage:editTransWork }); setEditingTransaction(null); setLoading(false); };
+  const handleDeleteTransaction = async (id:string, uid:string, amt:number) => { if(!confirm("Delete?"))return; setLoading(true); await deleteDoc(doc(db,"transactions",id)); if(uid){ const s = await getDoc(doc(db,"users",uid)); if(s.exists()){ const newT = Math.max(0,(s.data().totalSpent||0)-amt); await updateDoc(doc(db,"users",uid), { totalSpent:newT, vipLevel:calculateVIP(newT) }); } } setLoading(false); };
+  
+  const calculateVIP = (t:number) => VIP_TIERS.find(x=>t>=x.min)?.level||0;
+  const startEditUser = (u:any) => { setActiveTab('users'); setIsEditMode(true); setEditId(u.id); setFormName(u.name); setFormEmail(u.email); setFormAmount(String(u.totalSpent)); setFormRealName(u.realName||""); setFormPhone(u.phone||""); setFormLine(u.lineId||""); setFormAddress(u.address||""); };
+  const handleViewUser = (u: any) => { setSelectedUser(u); setShowUserModal(true); };
+  const resetForm = () => { setFormName(""); setFormEmail(""); setFormAmount(""); setFormNote(""); setSlipPreview(null); setWorkPreview(null); setFormRealName(""); setFormPhone(""); setFormLine(""); setFormAddress(""); };
+  const cancelEdit = () => { setIsEditMode(false); setEditId(null); resetForm(); };
+  const handleLogout = async () => { await signOut(auth); router.push("/login"); };
+  const handleGoHome = () => router.push("/");
+  
+  const isDark = theme === "dark";
+  const panelColor = isDark ? "bg-black/40 border-white/10" : "bg-white/60 border-slate-200";
+
+  if (!isAuthorized || !mounted) return <div className="bg-black h-screen w-screen flex items-center justify-center text-cyan-500 font-mono animate-pulse">VERIFYING...</div>;
 
   return (
-    <MagicBackground>
-      <div className="container mx-auto p-4 md:p-8">
-        
-        <div className="mb-10 text-center md:text-left">
-           <p className="font-serif text-3xl md:text-4xl text-gray-800 dark:text-[#e5e5e5] mb-2 transition-colors">
-             Welcome Back, <span className="text-[#d4af37] italic">SkizzKat</span>
-           </p>
-           <p className="text-sm tracking-widest uppercase opacity-60 text-[#d4af37]">Super Admin Dashboard</p>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-10">
-          <StatCard title="Total Revenue" value={`฿${totalRevenue.toLocaleString()}`} icon="💰" />
-          <StatCard title="Total Customers" value={`${users.length}`} icon="👥" />
-        </div>
+    <div className={cn("fixed inset-0 h-[100dvh] w-screen overflow-hidden flex flex-col select-none transition-colors duration-1000", isDark ? "bg-[#020617] text-white" : "bg-slate-50 text-slate-900")}>
+      
+      {/* BACKGROUND */}
+      <div className="absolute inset-0 z-0 pointer-events-none w-full h-full">
+        {!isLiteMode ? (
+          <motion.div className="w-full h-full" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+            {scene === "underwater" && <UnderwaterBackground intensity={1} speed={0.4} />}
+            {scene === "snow" && <SnowBackground count={150} intensity={0.8} speed={0.6} />}
+          </motion.div>
+        ) : <div className={cn("w-full h-full", isDark ? "bg-slate-950" : "bg-slate-50")} />}
+        <div className={cn("absolute inset-0 z-1", isDark ? "bg-black/40" : "bg-white/40")} />
+      </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-          
-          {/* --- LEFT: FORM --- */}
-          <div className="lg:col-span-4 space-y-6">
-            <div className={`backdrop-blur-xl p-8 rounded-[2rem] border shadow-lg transition-all duration-500
-                ${isEditMode ? 'bg-red-50 dark:bg-[#2a1c05]/90 border-red-500/30' : 'bg-white/80 dark:bg-[#121212]/80 border-[#d4af37]/20'}
-            `}>
-               <h2 className={`font-serif text-2xl mb-6 flex items-center gap-3 ${isEditMode ? 'text-red-500 dark:text-red-400' : 'text-[#d4af37]'}`}>
-                 <span className="text-xl">{isEditMode ? '✏️' : '✨'}</span> 
-                 {isEditMode ? 'Edit Customer' : 'New Transaction'}
-               </h2>
-               
-               <form onSubmit={handleSave} className="space-y-4">
-                 <div className="space-y-1">
-                   <label className="text-[10px] uppercase opacity-50 ml-2 text-gray-700 dark:text-gray-400">Customer Name</label>
-                   <input type="text" value={formName} onChange={e => setFormName(e.target.value)} required 
-                     className="w-full bg-white/50 dark:bg-[#000]/40 p-3 rounded-xl border border-gray-300 dark:border-[#d4af37]/10 focus:border-[#d4af37] outline-none text-gray-900 dark:text-[#e5e5e5] transition-colors" />
-                 </div>
-                 <div className="space-y-1">
-                    <label className="text-[10px] uppercase opacity-50 ml-2 text-gray-700 dark:text-gray-400">Email</label>
-                    <input type="email" value={formEmail} onChange={e => setFormEmail(e.target.value)}
-                     className="w-full bg-white/50 dark:bg-[#000]/40 p-3 rounded-xl border border-gray-300 dark:border-[#d4af37]/10 focus:border-[#d4af37] outline-none text-gray-900 dark:text-[#e5e5e5] transition-colors" />
+      {/* HEADER */}
+      <header className="relative z-50 p-4 md:p-6 shrink-0 flex justify-between items-center h-[12%]">
+        <div className={cn("flex gap-3 items-center p-2 pr-5 rounded-[2.5rem] border backdrop-blur-xl shadow-xl", panelColor)}>
+          <div className="relative w-10 h-10 overflow-hidden rounded-full border-2 border-cyan-500 shadow-lg">
+            <Image src="/croc-mascot.jpg" alt="Mascot" fill className="object-cover" />
+          </div>
+          <div className="hidden sm:block">
+            <h2 className="text-sm font-black uppercase tracking-tighter leading-none text-cyan-500">Croc Admin</h2>
+            <p className="text-[7px] font-mono tracking-widest mt-0.5 font-bold">V9.2 SYSTEM</p>
+          </div>
+        </div>
+        <div className="flex gap-3">
+           <button onClick={() => setShowLogEditor(true)} className={cn("px-4 py-2 rounded-xl text-xs font-bold border flex items-center gap-2 transition hover:scale-105", isDark ? "border-yellow-500/50 text-yellow-400 bg-yellow-500/10" : "border-orange-500/50 text-orange-600")}>
+               <FaBullhorn /> Edit Log
+           </button>
+           <button onClick={handleGoHome} className={cn("px-4 py-2 rounded-xl text-xs font-bold border opacity-50 hover:opacity-100 transition", isDark ? "border-white/20" : "border-black/20")}>Go Home</button>
+           <button onClick={handleLogout} className="px-4 py-2 rounded-xl bg-red-500 text-white text-xs font-bold shadow-lg hover:bg-red-600 transition">LOGOUT</button>
+        </div>
+      </header>
+
+      {/* MAIN CONTENT */}
+      <main className="relative z-20 flex-1 overflow-y-auto custom-scrollbar p-4 md:p-8 pb-32">
+         <div className="flex justify-center flex-wrap gap-4 mb-8">
+            <TabButton active={activeTab === 'analytics'} onClick={() => setActiveTab('analytics')} icon={<FaChartPie />} label="Analytics" isDark={isDark} />
+            <TabButton active={activeTab === 'services'} onClick={() => setActiveTab('services')} icon={<FaBriefcase />} label="Services" isDark={isDark} />
+            <TabButton active={activeTab === 'users'} onClick={() => setActiveTab('users')} icon={<FaUser />} label="Customers" isDark={isDark} />
+            <TabButton active={activeTab === 'transactions'} onClick={() => setActiveTab('transactions')} icon={<FaMoneyBillWave />} label="Transactions" isDark={isDark} />
+         </div>
+
+         {/* --- 📊 TAB: ANALYTICS (GRAPHS) --- */}
+         {activeTab === 'analytics' && (
+             <motion.div initial={{opacity:0}} animate={{opacity:1}} className="max-w-6xl mx-auto space-y-6">
+                 {/* Summary */}
+                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                     <StatCard title="Total Revenue" value={`฿${stats.totalRevenue.toLocaleString()}`} icon={<FaMoneyBillWave/>} color="emerald" isDark={isDark}/>
+                     <StatCard title="Total Hires" value={stats.totalHires} icon={<FaCheckCircle/>} color="blue" isDark={isDark}/>
+                     <StatCard title="Active Products" value={services.length} icon={<FaBriefcase/>} color="purple" isDark={isDark}/>
                  </div>
                  
-                 <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                       <label className="text-[10px] uppercase opacity-50 ml-2 text-gray-700 dark:text-gray-400">{isEditMode ? 'Total Balance' : 'Add Amount'}</label>
-                       <input type="number" value={formAmount} onChange={e => setFormAmount(e.target.value)} required 
-                        className="w-full bg-white/50 dark:bg-[#000]/40 p-3 rounded-xl border border-gray-300 dark:border-[#d4af37]/10 focus:border-[#d4af37] outline-none font-mono text-lg text-[#d4af37] transition-colors" />
-                    </div>
-                    <div className="space-y-1">
-                       <label className="text-[10px] uppercase opacity-50 ml-2 text-gray-700 dark:text-gray-400">Note</label>
-                       <input type="text" value={formNote} onChange={e => setFormNote(e.target.value)}
-                        className="w-full bg-white/50 dark:bg-[#000]/40 p-3 rounded-xl border border-gray-300 dark:border-[#d4af37]/10 focus:border-[#d4af37] outline-none text-sm text-gray-900 dark:text-[#e5e5e5] transition-colors" />
-                    </div>
-                 </div>
-
-                 {/* 📷 UPLOAD SECTION (SLIP & WORK) */}
-                 {!isEditMode && (
-                   <div className="grid grid-cols-2 gap-3 pt-2">
-                      <div className="space-y-1 text-center cursor-pointer group" onClick={() => slipInputRef.current?.click()}>
-                         <label className="text-[9px] uppercase opacity-50 text-gray-400 group-hover:text-[#d4af37]">🧾 Payment Slip</label>
-                         <div className={`h-20 w-full rounded-xl border-2 border-dashed flex items-center justify-center overflow-hidden
-                            ${slipPreview ? 'border-[#d4af37]' : 'border-gray-600 hover:border-[#d4af37]'}
-                         `}>
-                            {slipPreview ? <img src={slipPreview} className="w-full h-full object-cover" /> : <span className="text-xl">➕</span>}
+                 {/* Row 1: Line & Bar */}
+                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                     <div className={cn("p-6 rounded-3xl border flex flex-col h-80", panelColor)}>
+                         <h3 className="font-bold mb-4 flex items-center gap-2"><FaChartLine className="text-emerald-500"/> Revenue Trend</h3>
+                         <div className="flex-1 flex items-end gap-2 p-2 relative">
+                             {stats.chartData.length > 0 ? stats.chartData.map((d:any, i:number) => (
+                                 <div key={i} className="flex-1 flex flex-col justify-end items-center group relative h-full">
+                                     <div className="w-full bg-emerald-500/20 hover:bg-emerald-500/50 transition-all rounded-t-lg relative group-hover:scale-105" style={{height: `${Math.max(10, (d.value / Math.max(...stats.chartData.map((x:any)=>x.value))) * 100)}%`}}>
+                                         <div className="absolute -top-6 left-1/2 -translate-x-1/2 text-[9px] font-bold opacity-0 group-hover:opacity-100 bg-black text-white px-1 rounded whitespace-nowrap">฿{d.value.toLocaleString()}</div>
+                                     </div>
+                                     <div className="text-[8px] opacity-50 mt-1 rotate-45 origin-left truncate w-full">{d.date}</div>
+                                 </div>
+                             )) : <div className="m-auto opacity-30">No data</div>}
                          </div>
-                         <input type="file" ref={slipInputRef} className="hidden" accept="image/*" onChange={(e) => handleFileChange(e, setSlipPreview)} />
-                      </div>
-
-                      <div className="space-y-1 text-center cursor-pointer group" onClick={() => workInputRef.current?.click()}>
-                         <label className="text-[9px] uppercase opacity-50 text-gray-400 group-hover:text-cyan-400">🎁 Finished Work</label>
-                         <div className={`h-20 w-full rounded-xl border-2 border-dashed flex items-center justify-center overflow-hidden
-                            ${workPreview ? 'border-cyan-400' : 'border-gray-600 hover:border-cyan-400'}
-                         `}>
-                            {workPreview ? <img src={workPreview} className="w-full h-full object-cover" /> : <span className="text-xl">➕</span>}
+                     </div>
+                     <div className={cn("p-6 rounded-3xl border flex flex-col h-80", panelColor)}>
+                         <h3 className="font-bold mb-4 flex items-center gap-2"><FaChartBar className="text-blue-500"/> Top Services</h3>
+                         <div className="flex-1 flex flex-col justify-center space-y-3">
+                             {stats.topServices.length > 0 ? stats.topServices.map((s:any, i:number) => (
+                                 <div key={i} className="w-full"><div className="flex justify-between text-xs mb-1"><span className="truncate w-3/4">{s.name}</span><span className="font-bold">{s.value}</span></div><div className="h-2 bg-current/10 rounded-full overflow-hidden"><div className="h-full bg-blue-500 rounded-full" style={{width: `${(s.value / Math.max(...stats.topServices.map((x:any)=>x.value))) * 100}%`}}></div></div></div>
+                             )) : <div className="m-auto opacity-30">No data</div>}
                          </div>
-                         <input type="file" ref={workInputRef} className="hidden" accept="image/*" onChange={(e) => handleFileChange(e, setWorkPreview)} />
-                      </div>
-                   </div>
-                 )}
-
-                 {!isEditMode && (
-                   <div className="space-y-1">
-                      <label className="text-[10px] uppercase opacity-50 ml-2 text-[#d4af37]">📅 Backdate (Optional)</label>
-                      <input type="datetime-local" value={formDate} onChange={e => setFormDate(e.target.value)}
-                       className="w-full bg-white/50 dark:bg-[#000]/40 p-3 rounded-xl border border-gray-300 dark:border-[#d4af37]/10 focus:border-[#d4af37] outline-none text-sm text-gray-600 dark:text-gray-400 font-mono transition-colors" />
-                   </div>
-                 )}
-
-                 <div className="flex gap-2 pt-2">
-                   <button type="submit" disabled={loading} 
-                     className={`flex-1 py-4 rounded-xl font-bold shadow-lg transition-all uppercase tracking-wider text-sm
-                     ${isEditMode 
-                       ? 'bg-red-500/10 text-red-600 hover:bg-red-500 hover:text-white border border-red-500/50 dark:bg-red-900/50 dark:text-red-200' 
-                       : 'bg-gradient-to-r from-[#b45309] via-[#d4af37] to-[#b45309] text-white dark:text-black hover:shadow-[#d4af37]/30'}
-                     `}>
-                      {loading ? "Processing..." : (isEditMode ? "Save Changes" : "Confirm")}
-                   </button>
-                   
-                   {isEditMode && (
-                     <button type="button" onClick={cancelEdit} className="px-6 rounded-xl bg-gray-200 text-gray-600 hover:bg-gray-300 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700 font-bold border border-gray-300 dark:border-gray-700 transition-colors">
-                       Cancel
-                     </button>
-                   )}
+                     </div>
                  </div>
-               </form>
-            </div>
-          </div>
 
-          {/* --- RIGHT: TABLE --- */}
-          <div className="lg:col-span-8">
-            <div className="bg-white/80 dark:bg-[#121212]/80 backdrop-blur-xl rounded-[2rem] border border-[#d4af37]/20 shadow-xl overflow-hidden min-h-[600px] flex flex-col transition-all duration-500">
-               <div className="p-6 border-b border-[#d4af37]/10">
-                 <div className="bg-gray-100 dark:bg-[#000]/40 rounded-xl flex items-center px-4 border border-transparent focus-within:border-[#d4af37] transition-colors">
-                    <span className="opacity-50 text-[#d4af37]">🔍</span>
-                    <input type="text" placeholder="Search..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} 
-                      className="w-full bg-transparent p-4 outline-none text-gray-900 dark:text-[#e5e5e5] transition-colors" />
-                 </div>
-               </div>
-               <div className="flex-1 overflow-x-auto">
-                 <table className="w-full text-left min-w-[700px]">
-                   <thead className="text-[10px] uppercase tracking-widest bg-[#d4af37]/10 text-[#d4af37]">
-                     <tr>
-                       <th className="p-5 pl-8">Customer</th>
-                       <th className="p-5">Tier</th>
-                       <th className="p-5 text-right">Spent</th>
-                       <th className="p-5 text-center">Action</th>
-                     </tr>
-                   </thead>
-                   <tbody className="divide-y divide-[#d4af37]/10 text-gray-800 dark:text-[#e5e5e5]">
-                     {filteredUsers.map(u => (
-                       <tr key={u.id} className="hover:bg-[#d4af37]/5 transition group">
-                         <td className="p-5 pl-8 cursor-pointer" onClick={() => openUserDetail(u)}>
-                           <div className="font-bold text-lg font-serif group-hover:text-[#d4af37] transition-colors flex items-center gap-2">
-                             {u.realName || u.name}
-                             {u.realName && u.phone && <span className="text-[9px] bg-green-500/20 text-green-500 px-1 rounded">KYC</span>}
-                           </div>
-                           <div className="text-xs opacity-50 dark:opacity-40">{u.nickname ? `(${u.nickname}) ` : ""}{u.email}</div>
-                         </td>
-                         <td className="p-5"><span className="px-3 py-1 rounded-full text-[10px] font-bold border border-[#d4af37]/20 text-[#d4af37] bg-[#d4af37]/5">VIP {u.vipLevel}</span></td>
-                         <td className="p-5 text-right font-mono text-[#d4af37] text-lg">{u.totalSpent?.toLocaleString()}</td>
-                         <td className="p-5 text-center flex justify-center gap-2">
-                           <button onClick={() => openUserDetail(u)} className="p-2 rounded-lg bg-gray-200 text-gray-600 hover:bg-gray-300 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700 transition-colors">👁️</button>
-                           <button onClick={() => startEdit(u)} className="p-2 rounded-lg bg-blue-100 text-blue-600 hover:bg-blue-200 dark:bg-blue-900/30 dark:text-blue-400 dark:hover:bg-blue-900/50 transition-colors">✏️</button>
-                           <button onClick={() => handleDelete(u.id, u.name)} className="p-2 rounded-lg bg-red-100 text-red-600 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-400 dark:hover:bg-red-900/50 transition-colors">🗑️</button>
-                         </td>
-                       </tr>
-                     ))}
-                   </tbody>
-                 </table>
-               </div>
-            </div>
-          </div>
-        </div>
+                 {/* Row 2: NEW GRAPHS (Category & VIP) */}
+                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                     {/* 🍩 Category Donut Chart */}
+                     <div className={cn("p-6 rounded-3xl border flex flex-col h-80", panelColor)}>
+                         <h3 className="font-bold mb-4 flex items-center gap-2"><FaChartPie className="text-orange-500"/> Category Share</h3>
+                         <div className="flex-1 flex justify-center items-center">
+                             <div className="relative w-40 h-40">
+                                <svg viewBox="0 0 100 100" className="w-full h-full -rotate-90">
+                                    {stats.categoryData.reduce((acc:any, item:any, i:number) => {
+                                        const total = stats.categoryData.reduce((a:number, b:any) => a + b.value, 0);
+                                        const percent = (item.value / total) * 100;
+                                        const dashArray = `${percent} ${100 - percent}`;
+                                        const offset = acc.offset;
+                                        acc.offset -= percent;
+                                        const colors = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6"];
+                                        acc.elements.push(
+                                            <circle key={i} cx="50" cy="50" r="40" fill="transparent" stroke={colors[i % colors.length]} strokeWidth="20" strokeDasharray={dashArray} strokeDashoffset={offset} />
+                                        );
+                                        return acc;
+                                    }, { offset: 0, elements: [] }).elements}
+                                </svg>
+                                <div className="absolute inset-0 flex items-center justify-center text-xs font-bold opacity-50">CATS</div>
+                             </div>
+                             <div className="ml-6 space-y-2">
+                                 {stats.categoryData.map((c:any, i:number) => (
+                                     <div key={i} className="flex items-center gap-2 text-xs">
+                                         <div className="w-3 h-3 rounded-full" style={{backgroundColor: ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6"][i % 5]}}></div>
+                                         <span>{c.name} ({c.value})</span>
+                                     </div>
+                                 ))}
+                             </div>
+                         </div>
+                     </div>
 
-        {/* --- USER DETAIL MODAL --- */}
-        {showModal && selectedUser && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 dark:bg-black/90 backdrop-blur-sm" onClick={() => setShowModal(false)}>
-            <div className="relative bg-white dark:bg-[#121212] border border-[#d4af37]/30 w-full max-w-4xl rounded-3xl shadow-[0_0_50px_rgba(212,175,55,0.1)] overflow-hidden flex flex-col md:flex-row max-h-[90vh] transition-colors duration-500" onClick={e => e.stopPropagation()}>
-              <button onClick={() => setShowModal(false)} className="absolute top-4 right-4 z-[110] w-8 h-8 flex items-center justify-center bg-black/20 text-white rounded-full hover:bg-red-500 transition-all backdrop-blur-md shadow-lg">✕</button>
+                     {/* 📶 VIP Tier Distribution */}
+                     <div className={cn("p-6 rounded-3xl border flex flex-col h-80", panelColor)}>
+                         <h3 className="font-bold mb-4 flex items-center gap-2"><FaCrown className="text-yellow-500"/> VIP Distribution</h3>
+                         <div className="flex-1 flex items-end gap-1 p-2">
+                             {stats.vipChartData.map((d:any, i:number) => (
+                                 <div key={i} className="flex-1 flex flex-col justify-end items-center group">
+                                     <div className="w-full bg-yellow-500/20 hover:bg-yellow-500/50 rounded-t transition-all relative" style={{height: `${Math.max(5, (d.value / Math.max(...stats.vipChartData.map((x:any)=>x.value || 1))) * 100)}%`}}>
+                                         <div className="absolute -top-5 left-1/2 -translate-x-1/2 text-[8px] opacity-0 group-hover:opacity-100">{d.value}</div>
+                                     </div>
+                                     <div className="text-[8px] opacity-50 mt-1 rotate-45 origin-left truncate w-full">{d.name}</div>
+                                 </div>
+                             ))}
+                         </div>
+                     </div>
+                 </div>
+             </motion.div>
+         )}
 
-              {/* LEFT: User Profile */}
-              <div className="bg-gradient-to-br from-[#1a1a1a] to-[#000000] p-8 text-white relative md:w-1/3 flex flex-col items-center text-center border-r border-[#d4af37]/20">
-                 <div className="w-32 h-32 rounded-full border-4 border-[#d4af37] shadow-[0_0_20px_rgba(212,175,55,0.5)] overflow-hidden mb-6 bg-black flex items-center justify-center">
-                    {selectedUser.photoURL ? <img src={selectedUser.photoURL} className="w-full h-full object-cover" /> : <span className="text-6xl">👨‍✈️</span>}
-                 </div>
-                 <h2 className="font-serif text-3xl font-black text-[#d4af37] mb-1">{selectedUser.nickname || selectedUser.name?.split(" ")[0]}</h2>
-                 <p className="opacity-50 font-mono text-xs mb-6 break-all">{selectedUser.email}</p>
-                 <div className="bg-[#d4af37]/10 border border-[#d4af37]/30 p-4 rounded-2xl mb-6 text-center w-full">
-                    <p className="text-[10px] uppercase tracking-widest text-[#d4af37]">Total Spending</p>
-                    <p className="text-3xl font-mono font-bold text-white mt-1">฿{selectedUser.totalSpent?.toLocaleString()}</p>
-                    <div className="mt-2 inline-block px-3 py-1 bg-[#d4af37] text-black text-xs font-bold rounded-full">VIP LEVEL {selectedUser.vipLevel}</div>
-                 </div>
-                 <div className="mt-auto opacity-40 text-[10px] font-mono space-y-1">
-                    <div>UID: {selectedUser.id}</div>
-                    <div>Joined: {selectedUser.joinedAt?.toDate().toLocaleDateString() || "N/A"}</div>
-                 </div>
-              </div>
-
-              {/* RIGHT: Details */}
-              <div className="flex-1 flex flex-col bg-gray-50 dark:bg-[#0a0a0a] transition-colors overflow-hidden">
-                 <div className="p-8 pb-8 overflow-y-auto custom-scrollbar pt-12">
-                    
-                    <div className="mb-8">
-                       <h3 className="font-bold mb-4 text-[#d4af37] text-xs uppercase tracking-widest">📝 Personal Info (KYC)</h3>
-                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-white dark:bg-[#121212] p-5 rounded-2xl border border-gray-200 dark:border-[#333] shadow-sm">
-                          <InfoRow label="Real Name" value={selectedUser.realName} copy />
-                          <InfoRow label="Nickname" value={selectedUser.nickname} />
-                          <InfoRow label="Phone" value={selectedUser.phone} copy />
-                          <InfoRow label="Line ID" value={selectedUser.lineId} copy />
-                          <InfoRow label="Birthday" value={selectedUser.birthDate} />
-                          <div className="md:col-span-2"><InfoRow label="Address" value={selectedUser.address} copy /></div>
-                       </div>
+         {/* --- SERVICES --- */}
+         {activeTab === 'services' && (
+            <motion.div initial={{opacity:0}} animate={{opacity:1}} className="max-w-7xl mx-auto space-y-6">
+                <div className={cn("p-6 rounded-3xl border flex flex-col md:flex-row justify-between gap-4", panelColor)}>
+                    <button onClick={() => { setServiceForm(INITIAL_SERVICE_FORM); setEditingServiceId(null); setShowServiceModal(true); }} className="bg-cyan-500 text-black px-6 py-3 rounded-xl font-bold shadow-lg hover:scale-105 transition-all flex items-center gap-2"><FaPlus /> Create Product</button>
+                    <div className="flex flex-wrap gap-2 items-center flex-1 justify-end">
+                        <div className={cn("flex items-center px-3 py-2 rounded-xl border w-full md:w-auto", isDark?"border-white/10 bg-black/20":"border-black/10 bg-white/50")}><FaSearch className="opacity-50 mr-2"/><input placeholder="Search..." value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} className="bg-transparent outline-none text-xs w-32"/></div>
+                        <select value={filterCategory} onChange={e=>setFilterCategory(e.target.value)} className={cn("px-3 py-2 rounded-xl border text-xs outline-none bg-transparent", isDark?"border-white/10":"border-black/10")}><option value="all" className="text-black">All Cats</option>{availableCategories.map(c => c !== "all" && <option key={c} value={c} className="text-black">{c}</option>)}</select>
                     </div>
-
-                    <div>
-                       <h3 className="font-bold mb-4 text-[#d4af37] text-xs uppercase tracking-widest border-b border-[#d4af37]/10 pb-2">Transaction History</h3>
-                       <table className="w-full text-sm">
-                         <tbody className="divide-y divide-gray-200 dark:divide-[#333]">
-                           {selectedUser.history && selectedUser.history.length > 0 ? (
-                             selectedUser.history.map((h: any) => (
-                               <tr key={h.id} className="hover:bg-black/5 dark:hover:bg-white/5 transition group">
-                                 <td className="py-3 opacity-50 text-xs font-mono text-gray-700 dark:text-gray-400">{h.timestamp?.toDate().toLocaleString('th-TH')}</td>
-                                 <td className="py-3 font-medium px-4 text-gray-900 dark:text-[#e5e5e5]">
-                                   {h.note}
-                                   <div className="flex gap-2 mt-1">
-                                     {h.paymentSlip && <a href={h.paymentSlip} target="_blank" className="text-[9px] bg-[#d4af37]/20 text-[#d4af37] px-2 py-0.5 rounded hover:bg-[#d4af37] hover:text-black transition">🧾 Slip</a>}
-                                     {h.workImage && <a href={h.workImage} target="_blank" className="text-[9px] bg-cyan-500/20 text-cyan-400 px-2 py-0.5 rounded hover:bg-cyan-500 hover:text-black transition">🎁 Work</a>}
-                                   </div>
-                                 </td>
-                                 <td className="py-3 text-right text-[#d4af37] font-mono font-bold">+{h.amount.toLocaleString()}</td>
-                                 {/* ✅ ปุ่มแก้ไขรายการเก่า */}
-                                 <td className="py-3 text-right">
-                                    <button onClick={() => openEditTransaction(h)} className="text-[10px] bg-blue-500/20 text-blue-400 px-2 py-1 rounded hover:bg-blue-500 hover:text-white transition">EDIT ✏️</button>
-                                 </td>
-                               </tr>
-                             ))
-                           ) : (<tr><td colSpan={4} className="py-10 text-center opacity-40 text-gray-500 dark:text-gray-400">No history found.</td></tr>)}
-                         </tbody>
-                       </table>
-                    </div>
-
-                 </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* --- 🛠️ EDIT TRANSACTION MODAL --- */}
-        {editingTransaction && (
-          <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md" onClick={() => setEditingTransaction(null)}>
-             <div className="bg-[#1a1a1a] border border-[#d4af37]/50 p-8 rounded-3xl w-full max-w-lg shadow-2xl relative" onClick={e => e.stopPropagation()}>
-                <h3 className="text-xl font-serif text-[#d4af37] mb-6 flex items-center gap-2">🛠️ Edit Transaction</h3>
-                
-                <div className="space-y-4">
-                   {/* Note Input */}
-                   <div className="space-y-1">
-                      <label className="text-[10px] uppercase opacity-50 text-gray-400">Description</label>
-                      <input type="text" value={editTransNote} onChange={e => setEditTransNote(e.target.value)} 
-                        className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-white focus:border-[#d4af37] outline-none" />
-                   </div>
-
-                   {/* Slip Upload */}
-                   <div className="space-y-1" onClick={() => editTransSlipRef.current?.click()}>
-                      <label className="text-[10px] uppercase opacity-50 text-gray-400">🧾 Payment Slip (Update)</label>
-                      <div className={`h-16 w-full rounded-xl border-2 border-dashed flex items-center justify-center overflow-hidden cursor-pointer
-                         ${editTransSlip ? 'border-[#d4af37]' : 'border-gray-600 hover:border-[#d4af37]'}
-                      `}>
-                         {editTransSlip ? <img src={editTransSlip} className="w-full h-full object-cover" /> : <span className="text-sm text-gray-500">Click to upload slip</span>}
-                      </div>
-                      <input type="file" ref={editTransSlipRef} className="hidden" accept="image/*" onChange={(e) => handleFileChange(e, setEditTransSlip)} />
-                   </div>
-
-                   {/* Work Upload */}
-                   <div className="space-y-1" onClick={() => editTransWorkRef.current?.click()}>
-                      <label className="text-[10px] uppercase opacity-50 text-gray-400">🎁 Finished Work (Update)</label>
-                      <div className={`h-16 w-full rounded-xl border-2 border-dashed flex items-center justify-center overflow-hidden cursor-pointer
-                         ${editTransWork ? 'border-cyan-400' : 'border-gray-600 hover:border-cyan-400'}
-                      `}>
-                         {editTransWork ? <img src={editTransWork} className="w-full h-full object-cover" /> : <span className="text-sm text-gray-500">Click to upload work</span>}
-                      </div>
-                      <input type="file" ref={editTransWorkRef} className="hidden" accept="image/*" onChange={(e) => handleFileChange(e, setEditTransWork)} />
-                   </div>
-
-                   <div className="flex gap-3 pt-4">
-                      <button onClick={() => setEditingTransaction(null)} className="flex-1 py-3 rounded-xl border border-white/10 text-white hover:bg-white/10">Cancel</button>
-                      <button onClick={handleUpdateTransaction} disabled={loading} className="flex-1 py-3 rounded-xl bg-[#d4af37] text-black font-bold hover:bg-[#b45309]">
-                         {loading ? "Saving..." : "Update Transaction"}
-                      </button>
-                   </div>
                 </div>
-             </div>
-          </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                    {filteredServices.map((s) => (
+                        <div key={s.id} className={cn("p-4 rounded-3xl border group hover:border-cyan-500/50 transition-all flex flex-col", panelColor)}>
+                            <div className={`h-32 w-full rounded-2xl mb-3 relative overflow-hidden bg-black/20`}>{s.images?.length > 0 ? (<img src={s.images[0]} className="w-full h-full object-cover" />) : ( <div className="w-full h-full flex items-center justify-center text-xs opacity-50">No Image</div> )}<div className="absolute top-2 left-2 bg-cyan-500/80 backdrop-blur-md px-2 py-1 rounded text-[8px] text-black font-bold uppercase">{s.category}</div></div>
+                            <h3 className="font-bold text-sm leading-tight mb-1 line-clamp-2">{s.title}</h3>
+                            <div className="flex justify-between items-center text-xs opacity-60 mb-3 font-mono"><span>฿{s.packages?.basic?.price?.toLocaleString()}</span><span className="flex items-center gap-1 text-yellow-400"><FaStar/> {s.rating}</span></div>
+                            <div className="mt-auto flex gap-2"><ActionButton onClick={() => handleEditService(s)} icon={<FaEdit/>} color="blue" isDark={isDark} /><ActionButton onClick={() => handleDeleteService(s.id)} icon={<FaTrash/>} color="red" isDark={isDark} /></div>
+                        </div>
+                    ))}
+                </div>
+            </motion.div>
+         )}
+
+         {/* --- USERS & TRANS --- */}
+         {(activeTab === 'users' || activeTab === 'transactions') && (
+             <motion.div initial={{opacity:0}} animate={{opacity:1}} className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8">
+                {activeTab === 'users' && (
+                    <div className="lg:col-span-4">
+                        <div className={cn("sticky top-0 backdrop-blur-xl p-6 rounded-[2rem] border shadow-2xl transition-all", panelColor, isEditMode && "border-blue-500/30 bg-blue-500/5")}>
+                            <h2 className="font-black text-xl mb-6 flex items-center gap-2 uppercase">{isEditMode ? <><FaEdit className="text-blue-500"/> Edit Profile</> : <><FaMoneyBillWave className="text-cyan-500"/> Add Record</>}</h2>
+                            <form onSubmit={handleSaveUserOrTrans} className="space-y-4">
+                                <InputGroup label="Name" value={formName} onChange={setFormName} required isDark={isDark} />
+                                <InputGroup label="Email" value={formEmail} onChange={setFormEmail} required isDark={isDark} />
+                                {isEditMode && (<><div className="grid grid-cols-2 gap-3"><InputGroup label="Real Name" value={formRealName} onChange={setFormRealName} isDark={isDark} /><InputGroup label="Phone" value={formPhone} onChange={setFormPhone} isDark={isDark} /></div><InputGroup label="Line ID" value={formLine} onChange={setFormLine} isDark={isDark} /><InputGroup label="Address" value={formAddress} onChange={setFormAddress} isDark={isDark} /></>)}
+                                <div className="grid grid-cols-2 gap-3"><InputGroup label={isEditMode ? "Total Spent" : "Amount"} type="number" value={formAmount} onChange={setFormAmount} required isDark={isDark} className="font-mono text-cyan-500 font-bold"/><InputGroup label="Note" value={formNote} onChange={setFormNote} isDark={isDark} /></div>
+                                {!isEditMode && (<div className="grid grid-cols-2 gap-3 pt-2"><UploadBox label="Slip" preview={slipPreview} onClick={() => slipInputRef.current?.click()} isDark={isDark} /><UploadBox label="Work" preview={workPreview} onClick={() => workInputRef.current?.click()} isDark={isDark} color="cyan" /><input type="file" ref={slipInputRef} className="hidden" accept="image/*" onChange={(e) => handleFileChange(e, setSlipPreview)} /><input type="file" ref={workInputRef} className="hidden" accept="image/*" onChange={(e) => handleFileChange(e, setWorkPreview)} /></div>)}
+                                <button type="submit" disabled={loading} className={cn("w-full py-3 rounded-xl font-bold shadow-lg mt-4", isEditMode ? "bg-blue-500 text-white" : "bg-cyan-500 text-black")}>{loading ? "Processing..." : (isEditMode ? "Update" : "Confirm")}</button>
+                                {isEditMode && <button type="button" onClick={cancelEdit} className="w-full py-2 text-xs opacity-50">Cancel Edit</button>}
+                            </form>
+                        </div>
+                    </div>
+                )}
+                <div className={activeTab === 'users' ? "lg:col-span-8" : "col-span-12"}>
+                    <div className={cn("backdrop-blur-xl rounded-[2rem] border overflow-hidden shadow-xl min-h-[500px] flex flex-col", panelColor)}>
+                        {/* ✅ CSV EXPORT BUTTONS */}
+                        {activeTab === 'transactions' && (
+                            <div className="p-4 border-b border-white/5 flex justify-end gap-2">
+                                <button onClick={() => handleExportCSV(transactions, 'transactions')} className="bg-green-600 text-white px-4 py-2 rounded-lg font-bold text-xs hover:bg-green-500 transition flex items-center gap-2"><FaFileCsv/> Export CSV</button>
+                                <button onClick={() => setActiveTab('users')} className="bg-cyan-500 text-black px-4 py-2 rounded-lg font-bold text-xs hover:scale-105 transition">+ Add New</button>
+                            </div>
+                        )}
+                        {activeTab === 'users' && (
+                            <div className="p-4 border-b border-white/5 flex justify-end gap-2">
+                                <button onClick={() => handleExportCSV(users, 'users')} className="bg-green-600 text-white px-4 py-2 rounded-lg font-bold text-xs hover:bg-green-500 transition flex items-center gap-2"><FaFileCsv/> Export CSV</button>
+                            </div>
+                        )}
+                        
+                        <div className="overflow-x-auto flex-1">
+                           <table className="w-full text-left">
+                              <thead className={cn("text-[9px] uppercase tracking-widest", isDark ? "bg-white/5 text-cyan-500" : "bg-black/5 text-blue-600")}>
+                                 <tr>{activeTab === 'users' ? (<><th className="p-5 pl-8">User</th><th className="p-5">Tier</th><th className="p-5 text-right">Spent</th><th className="p-5 text-center">Action</th></>) : (<><th className="p-5 pl-8">Date</th><th className="p-5">User</th><th className="p-5">Note</th><th className="p-5 text-right">Amount</th><th className="p-5 text-center">Action</th></>)}</tr>
+                              </thead>
+                              <tbody className="divide-y divide-current/10">
+                                 {activeTab === 'users' ? filteredUsers.map(u => (<tr key={u.id} className="hover:bg-current/5 transition"><td className="p-5 pl-8 font-bold cursor-pointer" onClick={() => handleViewUser(u)}>{u.name}<div className="text-xs opacity-50">{u.email}</div></td><td className="p-5 text-xs"><span className="border border-current/20 px-2 py-1 rounded-full">VIP {u.vipLevel}</span></td><td className="p-5 text-right font-mono font-bold">฿{u.totalSpent?.toLocaleString()}</td><td className="p-5 flex justify-center gap-2"><ActionButton onClick={() => handleViewUser(u)} icon={<FaEye/>} color="gray" isDark={isDark} /><ActionButton onClick={() => startEditUser(u)} icon={<FaEdit/>} color="blue" isDark={isDark} /><ActionButton onClick={() => {if(confirm("Delete User?")) deleteDoc(doc(db,"users",u.id))}} icon={<FaTrash/>} color="red" isDark={isDark} /></td></tr>)) 
+                                 : currentTrans.map(t => (<tr key={t.id} className="hover:bg-current/5 transition"><td className="p-5 pl-8 text-xs font-mono opacity-50">{t.timestamp?.toDate().toLocaleString()}</td><td className="p-5 font-bold text-sm">{t.userName}</td><td className="p-5 text-sm">{t.note}</td><td className="p-5 text-right font-mono text-emerald-500 font-bold">+{t.amount?.toLocaleString()}</td><td className="p-5 flex justify-center gap-2"><ActionButton onClick={() => { setEditingTransaction(t); setEditTransNote(t.note||""); setEditTransSlip(t.paymentSlip); setEditTransWork(t.workImage); }} icon={<FaEdit/>} color="blue" isDark={isDark} /><ActionButton onClick={() => handleDeleteTransaction(t.id, t.userId, t.amount)} icon={<FaTrash/>} color="red" isDark={isDark} /></td></tr>))}
+                              </tbody>
+                           </table>
+                        </div>
+                        {activeTab === 'transactions' && filteredTrans.length > itemsPerPage && (<div className="p-4 border-t border-current/5 flex justify-center gap-2 items-center"><button onClick={() => paginate(currentPage - 1)} disabled={currentPage === 1} className="p-2 rounded-lg bg-current/10 disabled:opacity-30"><FaChevronLeft/></button><span className="text-xs font-mono opacity-50">Page {currentPage} of {totalPages}</span><button onClick={() => paginate(currentPage + 1)} disabled={currentPage === totalPages} className="p-2 rounded-lg bg-current/10 disabled:opacity-30"><FaChevronRight/></button></div>)}
+                    </div>
+                </div>
+             </motion.div>
+         )}
+      </main>
+
+      {/* --- MODALS --- */}
+      <AnimatePresence>
+        {/* ✅ LOG EDITOR MODAL (Fixed Text Color) */}
+        {showLogEditor && (
+            <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md" onClick={() => setShowLogEditor(false)}>
+                <motion.div initial={{scale:0.95}} animate={{scale:1}} className={cn("w-full max-w-2xl bg-white p-8 rounded-[2rem] shadow-2xl flex flex-col", isDark ? "bg-[#121212] border border-white/20" : "")} onClick={e => e.stopPropagation()}>
+                    <h3 className="text-2xl font-black mb-4 text-cyan-500">Edit System Info / Patch Notes</h3>
+                    <textarea 
+                        className={cn("w-full h-64 p-4 rounded-xl border bg-transparent outline-none resize-none font-mono text-xs leading-relaxed", isDark ? "border-white/20 text-white" : "border-black/20 text-black")}
+                        value={updateLogText}
+                        onChange={(e) => setUpdateLogText(e.target.value)}
+                        placeholder="Type your update log here..."
+                    />
+                    <div className="flex justify-end gap-3 mt-4">
+                        <button onClick={() => setShowLogEditor(false)} className="px-6 py-2 rounded-xl opacity-50 hover:opacity-100">Cancel</button>
+                        <button onClick={handleSaveLog} className="bg-cyan-500 text-black px-6 py-2 rounded-xl font-bold hover:scale-105 transition">{loading ? "Saving..." : "Save Log"}</button>
+                    </div>
+                </motion.div>
+            </motion.div>
         )}
 
-      </div>
-    </MagicBackground>
+        {/* Existing Modals */}
+        {showUserModal && selectedUser && (<motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md" onClick={() => setShowUserModal(false)}><motion.div initial={{scale:0.95}} animate={{scale:1}} className={cn("w-full max-w-4xl h-[80vh] rounded-[2rem] border overflow-hidden flex flex-col md:flex-row shadow-2xl", isDark ? "bg-[#121212] border-white/20" : "bg-white")} onClick={e => e.stopPropagation()}><div className="md:w-1/3 bg-black/20 p-8 flex flex-col items-center text-center border-r border-white/5"><div className="w-24 h-24 rounded-full border-4 border-cyan-500 mb-4 overflow-hidden">{selectedUser.photoURL ? <img src={selectedUser.photoURL} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center text-4xl bg-black text-white">👤</div>}</div><h2 className="text-2xl font-black">{selectedUser.name}</h2><p className="text-xs opacity-50 mb-4">{selectedUser.email}</p><div className="w-full bg-cyan-500/10 p-4 rounded-xl border border-cyan-500/20 mb-4"><div className="text-[10px] uppercase font-bold text-cyan-500">Total Spent</div><div className="text-2xl font-mono font-bold">฿{selectedUser.totalSpent?.toLocaleString()}</div></div><div className="text-left w-full space-y-2 text-xs opacity-70"><div><b>Real Name:</b> {selectedUser.realName || "-"}</div><div><b>Phone:</b> {selectedUser.phone || "-"}</div><div><b>Line:</b> {selectedUser.lineId || "-"}</div><div><b>Address:</b> {selectedUser.address || "-"}</div></div></div><div className="flex-1 p-6 flex flex-col overflow-hidden"><div className="flex justify-between items-center mb-4"><h3 className="font-bold uppercase tracking-widest opacity-60">Transaction History</h3><button onClick={() => setShowUserModal(false)}><FaTimes className="hover:text-red-500"/></button></div><div className="flex-1 overflow-y-auto custom-scrollbar space-y-2">{transactions.filter(t => t.userId === selectedUser.id).map(t => (<div key={t.id} className="p-3 rounded-xl border bg-white/5 flex justify-between items-center"><div><div className="text-[10px] opacity-50 font-mono">{t.timestamp?.toDate().toLocaleString()}</div><div className="font-bold text-sm">{t.note}</div></div><div className="text-right"><div className="font-mono font-bold text-emerald-500">+{t.amount?.toLocaleString()}</div></div></div>))}{transactions.filter(t => t.userId === selectedUser.id).length === 0 && <div className="text-center opacity-30 py-10">No history found</div>}</div></div></motion.div></motion.div>)}
+        {editingTransaction && (<motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md"><motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} className={cn("w-full max-w-md p-8 rounded-[2rem] border shadow-2xl", isDark ? "bg-[#1a1a1a] border-white/20" : "bg-white")} onClick={e => e.stopPropagation()}><h3 className="text-xl font-bold mb-4 flex items-center gap-2"><FaEdit className="text-blue-500"/> Edit Transaction</h3><div className="space-y-4"><InputGroup label="Note" value={editTransNote} onChange={setEditTransNote} isDark={isDark} /><div className="flex gap-2"><UploadBox label="Slip" preview={editTransSlip} onClick={() => editTransSlipRef.current?.click()} isDark={isDark} /><UploadBox label="Work" preview={editTransWork} onClick={() => editTransWorkRef.current?.click()} isDark={isDark} color="cyan" /></div><input type="file" ref={editTransSlipRef} className="hidden" accept="image/*" onChange={(e) => handleFileChange(e, setEditTransSlip)} /><input type="file" ref={editTransWorkRef} className="hidden" accept="image/*" onChange={(e) => handleFileChange(e, setEditTransWork)} /><div className="flex gap-3 pt-4"><button onClick={() => setEditingTransaction(null)} className="flex-1 py-3 rounded-xl opacity-50 hover:opacity-100 font-bold">Cancel</button><button onClick={handleUpdateTransaction} disabled={loading} className="flex-1 py-3 rounded-xl bg-cyan-500 text-black font-bold hover:scale-105 transition">{loading ? "Saving..." : "Save Changes"}</button></div></div></motion.div></motion.div>)}
+        
+        {/* SERVICE MODAL */}
+        {showServiceModal && (
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+                <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} className={cn("w-full max-w-5xl h-[90vh] rounded-[2rem] border overflow-hidden flex flex-col", isDark ? "bg-[#121212] border-white/20" : "bg-white")} onClick={e => e.stopPropagation()}>
+                    <div className="p-6 border-b border-white/10 flex justify-between items-center"><h3 className="font-bold text-xl flex items-center gap-2">{editingServiceId ? "Edit Service" : "New Product"}</h3><button onClick={() => setShowServiceModal(false)}><FaTimes className="text-xl hover:text-red-500"/></button></div>
+                    <div className="flex-1 overflow-y-auto custom-scrollbar p-8">
+                        <form onSubmit={handleSaveService} className="space-y-8">
+                            <div className="space-y-4">
+                                <h4 className="text-xs font-black uppercase tracking-widest text-cyan-500 border-b border-cyan-500/20 pb-2">1. Gallery & Info</h4>
+                                <div className="flex gap-2 overflow-x-auto pb-2"><div onClick={() => serviceImageInputRef.current?.click()} className={cn("flex-shrink-0 w-24 h-24 rounded-xl border-2 border-dashed flex flex-col items-center justify-center cursor-pointer transition hover:bg-white/5", isDark ? "border-white/20" : "border-black/20")}><FaPlus className="mb-1 opacity-50"/> <span className="text-[9px] opacity-50">Add Image</span></div><input type="file" ref={serviceImageInputRef} className="hidden" multiple accept="image/*" onChange={handleServiceImageUpload} />{serviceForm.images?.map((img:string, i:number) => (<div key={i} className="relative flex-shrink-0 w-24 h-24 rounded-xl overflow-hidden border border-white/10 group"><img src={img} className="w-full h-full object-cover" /><button type="button" onClick={() => removeServiceImage(i)} className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1 text-[8px] opacity-0 group-hover:opacity-100 transition"><FaTimes/></button></div>))}</div>
+                                <InputGroup label="Service Title" value={serviceForm.title} onChange={(v:string) => setServiceForm({...serviceForm, title: v})} required isDark={isDark} />
+                                <div className="grid grid-cols-2 gap-4"><div className="space-y-1"><label className="text-[9px] uppercase opacity-50 ml-2 font-bold">Category</label><input list="cat-suggestions" value={serviceForm.category} onChange={(e) => setServiceForm({...serviceForm, category: e.target.value})} className={cn("w-full p-3 rounded-xl border outline-none bg-transparent", isDark ? "border-white/20" : "border-gray-300")} placeholder="Type or Select..." /><datalist id="cat-suggestions">{availableCategories.map(c => <option key={c} value={c} />)}</datalist></div></div>
+                                <div className="space-y-1"><label className="text-[10px] uppercase opacity-50 font-bold ml-2">Description</label><textarea className={cn("w-full p-4 rounded-xl border bg-transparent outline-none min-h-[100px]", isDark ? "border-white/10" : "border-black/10")} value={serviceForm.description} onChange={(e) => setServiceForm({...serviceForm, description: e.target.value})}/></div>
+                            </div>
+                            
+                            <div className="space-y-4">
+                                <h4 className="text-xs font-black uppercase tracking-widest text-cyan-500 border-b border-cyan-500/20 pb-2">2. Manual Reviews</h4>
+                                <div className="flex gap-2"><InputGroup label="Customer Name" value={newReview.user} onChange={(v:string) => setNewReview({...newReview, user: v})} isDark={isDark} className="flex-1"/><InputGroup label="Star" type="number" value={newReview.star} onChange={(v:string) => setNewReview({...newReview, star: Number(v)})} isDark={isDark} className="w-20"/></div>
+                                <div className="flex gap-2 items-center"><InputGroup label="Comment" value={newReview.comment} onChange={(v:string) => setNewReview({...newReview, comment: v})} isDark={isDark} className="flex-1"/><div className="mt-6 flex items-center gap-2"><div onClick={() => reviewImageInputRef.current?.click()} className={cn("w-12 h-12 rounded-lg border-2 border-dashed flex items-center justify-center cursor-pointer transition hover:bg-white/5", isDark ? "border-white/20" : "border-black/20")}>{newReview.image ? <img src={newReview.image} className="w-full h-full object-cover rounded-lg"/> : <FaCamera className="opacity-50"/>}</div><input type="file" ref={reviewImageInputRef} className="hidden" accept="image/*" onChange={handleReviewImageUpload} /></div><button type="button" onClick={handleAddReview} className="bg-green-600 text-white px-4 rounded-xl font-bold text-xs mt-6 h-[46px]">Add</button></div>
+                                <div className="space-y-2 max-h-40 overflow-y-auto">{serviceForm.reviews?.map((r:any, i:number) => (<div key={i} className="flex justify-between items-center bg-white/5 p-2 rounded-lg text-xs"><div className="flex items-center gap-2">{r.image && <img src={r.image} className="w-8 h-8 rounded object-cover"/>}<span>⭐ {r.star} - <b>{r.user}</b>: {r.comment}</span></div><button type="button" onClick={() => removeReview(i)} className="text-red-500"><FaTrash/></button></div>))}</div>
+                            </div>
+                            
+                            <div className="space-y-4"><div className="flex justify-between items-end border-b border-cyan-500/20 pb-2"><h4 className="text-xs font-black uppercase tracking-widest text-cyan-500">3. Pricing Packages</h4><div className="flex gap-1">{['basic', 'standard', 'premium'].map(pk => (<button key={pk} type="button" onClick={() => setActivePackageTab(pk as any)} className={cn("px-4 py-1 text-[10px] font-bold uppercase rounded-t-lg transition-all", activePackageTab === pk ? "bg-cyan-500 text-black" : "bg-white/5 opacity-50 hover:opacity-100")}>{pk}</button>))}</div></div><div className={cn("p-6 rounded-2xl border", isDark ? "bg-white/5 border-white/5" : "bg-gray-50 border-gray-200")}><div className="grid grid-cols-2 gap-4 mb-4"><InputGroup label="Name" value={serviceForm.packages[activePackageTab].name} onChange={(v:string) => setServiceForm({...serviceForm, packages: {...serviceForm.packages, [activePackageTab]: {...serviceForm.packages[activePackageTab], name: v}}})} isDark={isDark} /><InputGroup label="Price" type="number" value={serviceForm.packages[activePackageTab].price} onChange={(v:string) => setServiceForm({...serviceForm, packages: {...serviceForm.packages, [activePackageTab]: {...serviceForm.packages[activePackageTab], price: v}}})} isDark={isDark} /></div><div className="grid grid-cols-2 gap-4 mb-4"><InputGroup label="Days" type="number" value={serviceForm.packages[activePackageTab].days} onChange={(v:string) => setServiceForm({...serviceForm, packages: {...serviceForm.packages, [activePackageTab]: {...serviceForm.packages[activePackageTab], days: v}}})} isDark={isDark} /><InputGroup label="Revisions" type="number" value={serviceForm.packages[activePackageTab].revisions} onChange={(v:string) => setServiceForm({...serviceForm, packages: {...serviceForm.packages, [activePackageTab]: {...serviceForm.packages[activePackageTab], revisions: v}}})} isDark={isDark} /></div><InputGroup label="Desc" value={serviceForm.packages[activePackageTab].desc} onChange={(v:string) => setServiceForm({...serviceForm, packages: {...serviceForm.packages, [activePackageTab]: {...serviceForm.packages[activePackageTab], desc: v}}})} isDark={isDark} className="mb-4" /><InputGroup label="Features (Comma separated)" value={serviceForm.packages[activePackageTab].features} onChange={(v:string) => setServiceForm({...serviceForm, packages: {...serviceForm.packages, [activePackageTab]: {...serviceForm.packages[activePackageTab], features: v}}})} isDark={isDark} /></div></div>
+                            <button type="submit" disabled={loading} className="w-full py-4 bg-gradient-to-r from-cyan-600 to-blue-600 text-white font-bold rounded-xl shadow-lg hover:shadow-cyan-500/30 transition-all uppercase tracking-widest">{loading ? "Saving..." : "Save Service Product"}</button>
+                        </form>
+                    </div>
+                </motion.div>
+            </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ✅ RESTORED THEME SWITCHER (BOTTOM-LEFT) */}
+      <motion.div initial={{ x: -100, opacity: 0 }} animate={{ x: 0, opacity: 1 }} transition={{ delay: 0.5 }} className="fixed bottom-6 left-6 md:bottom-10 md:left-10 z-[9999]">
+        <div className={cn("p-2 rounded-[2rem] border flex flex-col gap-3 shadow-[0_15px_40px_rgba(0,0,0,0.4)] backdrop-blur-xl", isDark ? "bg-black/80 border-white/10" : "bg-white/90 border-slate-200")}>
+          <button onClick={() => { setScene("underwater"); localStorage.setItem("croc_scene", "underwater"); }} className={cn("p-3 rounded-full transition-colors", scene==="underwater"?"bg-cyan-500 text-black shadow-lg":"text-gray-500 hover:bg-white/10")}>🌊</button>
+          <button onClick={() => { setScene("snow"); localStorage.setItem("croc_scene", "snow"); }} className={cn("p-3 rounded-full transition-colors", scene==="snow"?"bg-blue-500 text-white shadow-lg":"text-gray-500 hover:bg-white/10")}>❄️</button>
+          <div className="h-[1px] bg-current/10 mx-2 my-1" />
+          <button onClick={() => setIsLiteMode(!isLiteMode)} className={cn("text-[8px] font-black py-2 rounded-lg transition-colors border border-transparent", isLiteMode?"bg-yellow-500 text-black":(isDark?"text-white/50 hover:text-white":"text-black/50 hover:text-black"))}>{isLiteMode?"LITE":"FULL"}</button>
+          <button onClick={() => setTheme(isDark?"light":"dark")} className={cn("text-[8px] font-black py-2 rounded-lg transition-colors border border-transparent", isDark?"bg-white/10 text-white":"bg-black/5 text-black")}>{isDark?"DARK":"LIGHT"}</button>
+        </div>
+      </motion.div>
+
+    </div>
   );
 }
 
-function StatCard({ title, value, icon }: any) {
-  return (
-    <div className="bg-white/80 dark:bg-[#121212]/80 backdrop-blur-xl p-6 rounded-[2rem] border border-[#d4af37]/20 shadow-lg flex items-center gap-5 group hover:border-[#d4af37]/50 transition-all duration-500">
-      <div className="text-4xl grayscale group-hover:grayscale-0 transition-all duration-500">{icon}</div>
-      <div>
-        <p className="text-[10px] uppercase tracking-[0.2em] font-bold text-[#d4af37] mb-1 opacity-70 group-hover:opacity-100">{title}</p>
-        <p className="font-serif text-3xl font-black text-gray-900 dark:text-[#e5e5e5] group-hover:text-[#d4af37] transition-colors">{value}</p>
-      </div>
+// --- SUB COMPONENTS ---
+function StatCard({ title, value, icon, color, isDark }: any) {
+    const colors:any = { emerald: "text-emerald-500", blue: "text-blue-500", purple: "text-purple-500" };
+    return <div className={cn("p-6 rounded-3xl border flex items-center gap-4 transition hover:scale-105", isDark?"bg-black/40 border-white/10":"bg-white/60 border-slate-200")}>
+        <div className={cn("text-3xl", colors[color])}>{icon}</div>
+        <div><div className="text-[10px] uppercase opacity-50 font-bold tracking-widest">{title}</div><div className="text-2xl font-black">{value}</div></div>
     </div>
-  );
+}
+function TabButton({ active, onClick, icon, label, isDark }: any) {
+    return <button onClick={onClick} className={cn("flex items-center gap-2 px-6 py-3 rounded-full transition-all border font-bold text-xs uppercase tracking-wide", active ? (isDark ? "bg-cyan-500 text-black border-cyan-500 shadow-lg" : "bg-black text-white border-black") : (isDark ? "bg-white/5 border-white/10 hover:bg-white/10" : "bg-white border-slate-200 hover:bg-gray-50"))}>{icon} {label}</button>;
+}
+function InputGroup({ label, type = "text", value, onChange, className = "", required = false, isDark, placeholder }: any) {
+    return <div className={`space-y-1 ${className}`}><label className="text-[9px] uppercase opacity-50 ml-2 font-bold">{label} {required && "*"}</label><input type={type} value={value} onChange={e => onChange(e.target.value)} required={required} placeholder={placeholder} className={cn("w-full p-3 rounded-xl border outline-none transition-all bg-transparent", isDark ? "border-white/20 focus:border-cyan-500" : "border-gray-300 focus:border-blue-500")} /></div>;
+}
+function UploadBox({ label, preview, onClick, isDark, color = "white" }: any) {
+    return <div className="space-y-1 cursor-pointer group flex-1" onClick={onClick}><label className="text-[9px] uppercase opacity-50 ml-1 group-hover:opacity-100 transition">{label}</label><div className={cn("h-16 w-full rounded-xl border-2 border-dashed flex items-center justify-center overflow-hidden transition-all", preview ? "border-solid border-cyan-500" : (color==='cyan'?'border-cyan-500':'border-white/30'), isDark ? "bg-black/20 hover:bg-white/5" : "bg-gray-50 hover:bg-gray-100")}>{preview ? <img src={preview} className="w-full h-full object-cover" /> : <FaCamera className="opacity-30" />}</div></div>;
+}
+function ActionButton({ onClick, icon, color, isDark }: any) {
+    const colors: any = { gray: isDark?"hover:bg-white/20":"hover:bg-gray-200", blue: isDark?"hover:bg-blue-500/20 text-blue-400":"hover:bg-blue-100 text-blue-600", red: isDark?"hover:bg-red-500/20 text-red-400":"hover:bg-red-100 text-red-600" };
+    return <button onClick={(e) => { e.stopPropagation(); onClick(); }} className={cn("p-2 rounded-lg transition-colors", colors[color])}>{icon}</button>;
 }
