@@ -37,7 +37,7 @@ const THE_BOSS = {
   role: "Full Stack Developer",
   avatar: "/croc-mascot.jpg",
   facebook: "https://www.facebook.com/sarawut.phusee",
-  line: "sxrx_wut18",
+  line: "sxrx_wut18.",
   email: "skizzkat@gmail.com",
   phone: "0959670875",
   location: "Chiang Mai, Thailand",
